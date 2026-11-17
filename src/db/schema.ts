@@ -223,3 +223,11 @@ export const paymentsRelations = relations(payments, ({ one }) => ({
     references: [tenants.id],
   }),
 }));
+
+// 7. Configuration SaaS Multi-Agences, Utilisateurs RBAC & Modèles PDF persistés dans Cloud SQL
+export const appSettings = pgTable('app_settings', {
+  id: text('id').primaryKey(), // ex: 'gimmo_saas_store'
+  storeJson: text('store_json').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
