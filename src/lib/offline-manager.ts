@@ -209,9 +209,14 @@ export function applyOptimisticMutationToSnapshot(
       phone: body.phone,
       address: body.address,
       taxId: body.taxId || null,
-      iban: body.taxId || body.iban || null,
+      iban: body.iban || null,
       commissionRate: Number(body.commissionRate),
       contractHeaderNote: body.contractHeaderNote || null,
+      portalUsername:
+        body.portalUsername ||
+        (body.email ? String(body.email).trim().toLowerCase() : null),
+      portalPassword: body.portalPassword || null,
+      portalEnabled: body.portalEnabled !== false,
       createdAt: nowIso,
     };
     snapshot.landlords = [...snapshot.landlords, newLandlord];
@@ -230,6 +235,18 @@ export function applyOptimisticMutationToSnapshot(
             iban: body.iban || null,
             commissionRate: Number(body.commissionRate),
             contractHeaderNote: body.contractHeaderNote || null,
+            portalUsername:
+              body.portalUsername !== undefined
+                ? body.portalUsername
+                : l.portalUsername,
+            portalPassword:
+              body.portalPassword !== undefined
+                ? body.portalPassword
+                : l.portalPassword,
+            portalEnabled:
+              body.portalEnabled !== undefined
+                ? Boolean(body.portalEnabled)
+                : l.portalEnabled ?? true,
           }
         : l
     );

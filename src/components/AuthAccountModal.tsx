@@ -15,10 +15,14 @@ import {
   Clock,
   Volume2,
   MessageCircle,
+  KeyRound,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import {
   type SaaSTenantAgency,
   type SaaSUserAccount,
+  type LandlordPortalSession,
   ROLE_PERMISSIONS,
 } from '../types/gimmo.ts';
 import {
@@ -40,6 +44,10 @@ interface AuthAccountModalProps {
   activeAccount: SaaSUserAccount | null;
   onLoginSuccess: (account: SaaSUserAccount, agency: SaaSTenantAgency) => Promise<void>;
   onAgencyRegistered?: (updatedTemplates?: DocumentTemplatesStore) => Promise<void>;
+  onLandlordPortalLoginSuccess?: (
+    session: LandlordPortalSession,
+    passwordUsed: string
+  ) => void;
   onLogout: () => Promise<void>;
   onGoogleLogin: (targetTenantId: string) => Promise<void>;
   onClose?: () => void;
@@ -58,6 +66,7 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
   activeAccount,
   onLoginSuccess,
   onAgencyRegistered,
+  onLandlordPortalLoginSuccess,
   onLogout,
   onGoogleLogin,
   onClose,
@@ -66,9 +75,22 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
   const tenants = resolveSaaSTenants(templatesStore);
   const users = resolveSaaSUsers(templatesStore);
 
-  const [tab, setTab] = useState<'login' | 'register'>('login');
+  const [tab, setTab] = useState<'login' | 'register' | 'landlord_portal'>(() => {
+    if (
+      typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('portal') === 'bailleur'
+    ) {
+      return 'landlord_portal';
+    }
+    return 'login';
+  });
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+
+  // État connexion Portail Bailleur
+  const [landlordIdentifier, setLandlordIdentifier] = useState('');
+  const [landlordPassword, setLandlordPassword] = useState('');
+  const [showLandlordPassword, setShowLandlordPassword] = useState(false);
 
   // État création de compte utilisateur (Rôle par défaut : Directeur d'Agence, sans menu déroulant Fonction)
   const [regFullName, setRegFullName] = useState('');
@@ -216,6 +238,50 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
     setErrorMsg(
       'Aucun compte trouvé pour cette adresse email. Veuillez créer votre compte et enregistrer votre agence dans l’onglet « Créer un compte ».'
     );
+  };
+
+  const handleLandlordPortalSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setApprovalPendingNotice(null);
+
+    if (!landlordIdentifier.trim() || !landlordPassword.trim()) {
+      setErrorMsg(
+        'Veuillez saisir votre compte bailleur et le mot de passe reçu par WhatsApp.'
+      );
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/landlord-portal/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier: landlordIdentifier.trim(),
+          password: landlordPassword.trim(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          data?.error ||
+            'Identifiant ou mot de passe bailleur invalide. Vérifiez le message WhatsApp envoyé par votre agence.'
+        );
+      }
+
+      onLandlordPortalLoginSuccess?.(
+        data as LandlordPortalSession,
+        landlordPassword.trim()
+      );
+      onClose?.();
+    } catch (err: any) {
+      setErrorMsg(
+        err.message || 'Impossible de se connecter au Portail Bailleur.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
@@ -396,10 +462,14 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
           </div>
           <div>
             <h2 className="text-base sm:text-lg font-extrabold tracking-tight">
-              Connexion à votre Compte Agence
+              {tab === 'landlord_portal'
+                ? 'Portail Bailleur — Espace Propriétaire'
+                : 'Connexion à votre Compte Agence'}
             </h2>
             <p className="text-xs text-indigo-200 mt-0.5">
-              Identifiez-vous pour accéder à votre espace de gestion locative.
+              {tab === 'landlord_portal'
+                ? 'Connectez-vous avec les accès reçus par WhatsApp pour suivre vos biens immobiliers.'
+                : 'Identifiez-vous pour accéder à votre espace de gestion locative.'}
             </p>
           </div>
         </div>
@@ -445,21 +515,21 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
         </div>
       )}
 
-      {/* Onglets Connexion / Créer un Compte */}
-      <div className="px-5 pt-3 bg-slate-100 border-b border-slate-200 flex items-center gap-2 shrink-0">
+      {/* Onglets Connexion Agence / Créer un Compte / Portail Bailleur */}
+      <div className="px-4 sm:px-5 pt-3 bg-slate-100 border-b border-slate-200 flex items-center gap-1.5 overflow-x-auto shrink-0">
         <button
           type="button"
           onClick={() => {
             setTab('login');
             setErrorMsg(null);
           }}
-          className={`px-4 py-2 text-xs sm:text-sm font-bold rounded-t-lg border-b-2 transition-colors flex items-center gap-2 ${
+          className={`px-3.5 py-2 text-xs font-bold rounded-t-lg border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
             tab === 'login'
               ? 'bg-white text-indigo-950 border-indigo-700'
               : 'text-slate-600 border-transparent hover:text-slate-900'
           }`}
         >
-          <LogIn className="w-4 h-4" />
+          <LogIn className="w-3.5 h-3.5" />
           Se connecter
         </button>
         <button
@@ -469,15 +539,33 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
             setErrorMsg(null);
             setApprovalPendingNotice(null);
           }}
-          className={`px-4 py-2 text-xs sm:text-sm font-bold rounded-t-lg border-b-2 transition-colors flex items-center gap-2 ${
+          className={`px-3.5 py-2 text-xs font-bold rounded-t-lg border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
             tab === 'register'
               ? 'bg-white text-indigo-950 border-indigo-700'
               : 'text-slate-600 border-transparent hover:text-slate-900'
           }`}
         >
-          <UserPlus className="w-4 h-4" />
+          <UserPlus className="w-3.5 h-3.5" />
           Créer un compte
         </button>
+        {onLandlordPortalLoginSuccess && (
+          <button
+            type="button"
+            onClick={() => {
+              setTab('landlord_portal');
+              setErrorMsg(null);
+              setApprovalPendingNotice(null);
+            }}
+            className={`px-3.5 py-2 text-xs font-bold rounded-t-lg border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              tab === 'landlord_portal'
+                ? 'bg-white text-emerald-900 border-emerald-600'
+                : 'text-slate-600 border-transparent hover:text-slate-900'
+            }`}
+          >
+            <KeyRound className="w-3.5 h-3.5 text-emerald-700" />
+            Portail Bailleur
+          </button>
+        )}
       </div>
 
       {/* Corps */}
@@ -625,6 +713,76 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
               Continuer avec Google
             </button>
           </div>
+        ) : tab === 'landlord_portal' ? (
+          /* Connexion dédiée au Portail Bailleur (Propriétaires Mandants) */
+          <form onSubmit={handleLandlordPortalSubmit} className="space-y-4">
+            <div className="p-3 bg-emerald-50/80 border border-emerald-200 rounded-md text-xs text-emerald-950">
+              Saisissez le <strong>compte</strong> et le{' '}
+              <strong>mot de passe</strong> qui vous ont été transmis sur{' '}
+              <strong>WhatsApp</strong> par votre agence immobilière afin de suivre vos biens, vos baux, vos quittances et vos reversements.
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                Compte Bailleur (Email, Identifiant ou Téléphone WhatsApp) *
+              </label>
+              <div className="relative">
+                <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  required
+                  value={landlordIdentifier}
+                  onChange={(e) => setLandlordIdentifier(e.target.value)}
+                  placeholder="Ex: proprietaire@domaine.ci ou +225 07 00 00 00 00"
+                  className="w-full pl-9 pr-3 py-2.5 text-sm bg-white border border-slate-300 rounded-md focus:outline-none focus:border-emerald-600 text-slate-900"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                Mot de passe Portail reçu sur WhatsApp *
+              </label>
+              <div className="relative">
+                <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type={showLandlordPassword ? 'text' : 'password'}
+                  required
+                  value={landlordPassword}
+                  onChange={(e) => setLandlordPassword(e.target.value)}
+                  placeholder="Ex: GIM-4829-KP"
+                  className="w-full pl-9 pr-10 py-2.5 text-sm font-mono bg-white border border-slate-300 rounded-md focus:outline-none focus:border-emerald-600 text-slate-900"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowLandlordPassword((prev) => !prev)}
+                  className="absolute right-2.5 top-2 p-1 text-slate-400 hover:text-slate-700"
+                  title={
+                    showLandlordPassword
+                      ? 'Masquer le mot de passe'
+                      : 'Afficher le mot de passe'
+                  }
+                >
+                  {showLandlordPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full py-2.5 px-4 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-md transition-colors flex items-center justify-center gap-2 disabled:opacity-50 shadow-xs"
+            >
+              <LogIn className="w-4 h-4" />
+              {submitting
+                ? 'Ouverture de votre portail...'
+                : 'Accéder à mon Portail Bailleur'}
+            </button>
+          </form>
         ) : (
           /* Formulaire de création de compte : sans menu déroulant Fonction, rôle Directeur d'Agence par défaut, nom de l'agence clé unique, et numéro WhatsApp obligatoire */
           <form noValidate onSubmit={handleRegisterSubmit} className="space-y-4">

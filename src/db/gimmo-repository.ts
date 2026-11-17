@@ -6,7 +6,11 @@ import {
   leases,
   payments,
 } from './schema.ts';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, inArray } from 'drizzle-orm';
+import {
+  deriveDefaultLandlordUsername,
+  generateLandlordPortalPassword,
+} from '../lib/landlord-portal.ts';
 
 /**
  * Initialise des données de démonstration réalistes (Multi-Bailleurs, Biens géolocalisés PostGIS,
@@ -733,9 +737,40 @@ export async function createLandlordRecord(data: {
   iban?: string;
   commissionRate: number;
   contractHeaderNote?: string;
+  portalUsername?: string;
+  portalPassword?: string;
+  portalEnabled?: boolean;
 }) {
   try {
-    const inserted = await db.insert(landlords).values(data).returning();
+    const portalUsername =
+      (data.portalUsername || '').trim() ||
+      deriveDefaultLandlordUsername({
+        email: data.email,
+        phone: data.phone,
+        fullName: data.fullName,
+      });
+    const portalPassword =
+      (data.portalPassword || '').trim() || generateLandlordPortalPassword();
+    const portalEnabled = data.portalEnabled !== false;
+
+    const inserted = await db
+      .insert(landlords)
+      .values({
+        userId: data.userId,
+        fullName: data.fullName,
+        companyName: data.companyName || null,
+        email: data.email,
+        phone: data.phone,
+        address: data.address,
+        taxId: data.taxId || null,
+        iban: data.iban || null,
+        commissionRate: data.commissionRate,
+        contractHeaderNote: data.contractHeaderNote || null,
+        portalUsername,
+        portalPassword,
+        portalEnabled,
+      })
+      .returning();
     return inserted[0];
   } catch (error) {
     console.error('Database query failed in createLandlordRecord:', error);
@@ -910,9 +945,41 @@ export async function updateLandlordRecord(
     iban?: string;
     commissionRate: number;
     contractHeaderNote?: string;
+    portalUsername?: string;
+    portalPassword?: string;
+    portalEnabled?: boolean;
   }
 ) {
   try {
+    const currentRows = await db
+      .select()
+      .from(landlords)
+      .where(eq(landlords.id, landlordId));
+    if (!currentRows.length) {
+      throw new Error('Bailleur introuvable');
+    }
+    const existing = currentRows[0];
+
+    const resolvedUsername =
+      data.portalUsername !== undefined && data.portalUsername.trim() !== ''
+        ? data.portalUsername.trim()
+        : existing.portalUsername ||
+          deriveDefaultLandlordUsername({
+            email: data.email,
+            phone: data.phone,
+            fullName: data.fullName,
+          });
+
+    const resolvedPassword =
+      data.portalPassword !== undefined && data.portalPassword.trim() !== ''
+        ? data.portalPassword.trim()
+        : existing.portalPassword || generateLandlordPortalPassword();
+
+    const resolvedEnabled =
+      data.portalEnabled !== undefined
+        ? Boolean(data.portalEnabled)
+        : existing.portalEnabled ?? true;
+
     const updated = await db
       .update(landlords)
       .set({
@@ -925,6 +992,9 @@ export async function updateLandlordRecord(
         iban: data.iban || null,
         commissionRate: data.commissionRate,
         contractHeaderNote: data.contractHeaderNote || null,
+        portalUsername: resolvedUsername,
+        portalPassword: resolvedPassword,
+        portalEnabled: resolvedEnabled,
       })
       .where(eq(landlords.id, landlordId))
       .returning();
@@ -1302,4 +1372,181 @@ export async function renamePropertyTypeInRecords(
     });
   }
 }
+
+export async function upsertLandlordPortalCredentialsRecord(
+  landlordId: number,
+  options: {
+    portalUsername?: string;
+    portalPassword?: string;
+    portalEnabled?: boolean;
+    regeneratePassword?: boolean;
+  }
+) {
+  const rows = await db
+    .select()
+    .from(landlords)
+    .where(eq(landlords.id, landlordId));
+  if (!rows.length) {
+    throw new Error('Bailleur introuvable.');
+  }
+  const existing = rows[0];
+
+  const nextUsername =
+    options.portalUsername && options.portalUsername.trim()
+      ? options.portalUsername.trim()
+      : existing.portalUsername ||
+        deriveDefaultLandlordUsername({
+          email: existing.email,
+          phone: existing.phone,
+          fullName: existing.fullName,
+        });
+
+  const nextPassword = options.regeneratePassword
+    ? generateLandlordPortalPassword()
+    : options.portalPassword && options.portalPassword.trim()
+      ? options.portalPassword.trim()
+      : existing.portalPassword || generateLandlordPortalPassword();
+
+  const nextEnabled =
+    options.portalEnabled !== undefined
+      ? Boolean(options.portalEnabled)
+      : existing.portalEnabled ?? true;
+
+  const updated = await db
+    .update(landlords)
+    .set({
+      portalUsername: nextUsername,
+      portalPassword: nextPassword,
+      portalEnabled: nextEnabled,
+    })
+    .where(eq(landlords.id, landlordId))
+    .returning();
+
+  return updated[0];
+}
+
+export async function authenticateLandlordPortalRecord(
+  identifier: string,
+  password: string,
+  explicitLandlordId?: number
+) {
+  const cleanId = (identifier || '').trim().toLowerCase();
+  const idDigits = (identifier || '').replace(/\D+/g, '');
+  const cleanPass = (password || '').trim();
+
+  if ((!cleanId && !explicitLandlordId) || !cleanPass) {
+    throw new Error(
+      'Veuillez saisir votre compte (identifiant, email ou téléphone) et votre mot de passe.'
+    );
+  }
+
+  const allLandlords = explicitLandlordId
+    ? await db
+        .select()
+        .from(landlords)
+        .where(eq(landlords.id, explicitLandlordId))
+    : await db.select().from(landlords);
+
+  const candidates = allLandlords.filter((l) => {
+    if (explicitLandlordId && l.id === explicitLandlordId) {
+      return true;
+    }
+    const uName = (l.portalUsername || '').trim().toLowerCase();
+    const uMail = (l.email || '').trim().toLowerCase();
+    const lDigits = (l.phone || '').replace(/\D+/g, '');
+    const phoneMatch =
+      idDigits.length >= 8 &&
+      lDigits.length >= 8 &&
+      (lDigits === idDigits ||
+        lDigits.endsWith(idDigits) ||
+        idDigits.endsWith(lDigits));
+
+    return (
+      (uName && uName === cleanId) ||
+      (uMail && uMail === cleanId) ||
+      phoneMatch
+    );
+  });
+
+  if (candidates.length === 0) {
+    throw new Error(
+      'Aucun compte bailleur trouvé pour cet identifiant. Vérifiez les accès reçus par WhatsApp.'
+    );
+  }
+
+  const enabledCandidates = candidates.filter((c) => c.portalEnabled !== false);
+  if (enabledCandidates.length === 0) {
+    throw new Error(
+      'L’accès au Portail Bailleur pour ce compte est actuellement désactivé par votre agence.'
+    );
+  }
+
+  const withPasswordCandidates = enabledCandidates.filter((c) =>
+    Boolean((c.portalPassword || '').trim())
+  );
+  if (withPasswordCandidates.length === 0) {
+    throw new Error(
+      'Aucun mot de passe portail n’a encore été activé pour ce compte. Demandez vos accès WhatsApp à votre agence.'
+    );
+  }
+
+  const matched = withPasswordCandidates.find((c) => {
+    const storedPass = (c.portalPassword || '').trim();
+    const isGeneratedCode = storedPass.toUpperCase().startsWith('GIM-');
+    return isGeneratedCode
+      ? storedPass.toUpperCase() === cleanPass.toUpperCase()
+      : storedPass === cleanPass;
+  });
+
+  if (!matched) {
+    throw new Error(
+      'Mot de passe incorrect. Veuillez vérifier le code reçu sur WhatsApp.'
+    );
+  }
+
+  const [updatedRows, landlordProperties, landlordLeases, landlordPayments] =
+    await Promise.all([
+      db
+        .update(landlords)
+        .set({ portalLastLoginAt: new Date() })
+        .where(eq(landlords.id, matched.id))
+        .returning(),
+      db
+        .select()
+        .from(properties)
+        .where(eq(properties.landlordId, matched.id))
+        .orderBy(desc(properties.id)),
+      db
+        .select()
+        .from(leases)
+        .where(eq(leases.landlordId, matched.id))
+        .orderBy(desc(leases.id)),
+      db
+        .select()
+        .from(payments)
+        .where(eq(payments.landlordId, matched.id))
+        .orderBy(desc(payments.id)),
+    ]);
+
+  const tenantIds = Array.from(
+    new Set([
+      ...landlordLeases.map((l) => l.tenantId),
+      ...landlordPayments.map((p) => p.tenantId),
+    ])
+  );
+
+  const landlordTenants =
+    tenantIds.length > 0
+      ? await db.select().from(tenants).where(inArray(tenants.id, tenantIds))
+      : [];
+
+  return {
+    landlord: updatedRows[0] || matched,
+    properties: landlordProperties,
+    leases: landlordLeases,
+    tenants: landlordTenants,
+    payments: landlordPayments,
+  };
+}
+
 

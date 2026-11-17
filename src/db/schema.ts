@@ -36,6 +36,10 @@ export const landlords = pgTable(
     iban: text('iban'), // Coordonnées bancaires / Mobile Money
     commissionRate: doublePrecision('commission_rate').default(8.0).notNull(), // % honoraires agence
     contractHeaderNote: text('contract_header_note'), // Clause / en-tête personnalisée bailleur
+    portalUsername: text('portal_username'), // Identifiant de connexion au Portail Bailleur
+    portalPassword: text('portal_password'), // Mot de passe dédié au Portail Bailleur
+    portalEnabled: boolean('portal_enabled').default(true).notNull(), // Activation accès Portail Bailleur
+    portalLastLoginAt: timestamp('portal_last_login_at'), // Dernière connexion au Portail Bailleur
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => [index('idx_landlords_user').on(table.userId)]

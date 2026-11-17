@@ -21,6 +21,7 @@ import {
   PropertyTypeItem,
   SaaSUserAccount,
   SaaSTenantAgency,
+  LandlordPortalSession,
   ROLE_PERMISSIONS,
 } from './types/gimmo.ts';
 import { PropertyMapView } from './components/PropertyMapView.tsx';
@@ -35,6 +36,7 @@ import { UserGuideModal } from './components/UserGuideModal.tsx';
 import { AgencyProfilePanel } from './components/AgencyProfilePanel.tsx';
 import { SaaSSuperAdminPanel } from './components/SaaSSuperAdminPanel.tsx';
 import { AuthAccountModal } from './components/AuthAccountModal.tsx';
+import { LandlordPortalView } from './components/LandlordPortalView.tsx';
 import { useOnlineStatus } from './hooks/usePWAInstall.ts';
 import {
   DocumentTemplatesStore,
@@ -81,11 +83,17 @@ import {
   ShieldCheck,
   Volume2,
   MessageCircle,
+  KeyRound,
 } from 'lucide-react';
 import {
   playAgencyCreatedSound,
   buildAgencyCreatedWhatsAppDetails,
 } from './lib/agency-notifications.ts';
+import {
+  generateLandlordPortalPassword,
+  deriveDefaultLandlordUsername,
+  buildLandlordPortalWhatsAppDetails,
+} from './lib/landlord-portal.ts';
 
 type ActiveSection =
   | 'map_properties'
@@ -179,6 +187,14 @@ export default function App() {
 
   // Compte utilisateur connecté : null au lancement pour afficher la Page de Connexion en première page
   const [activeAccount, setActiveAccount] = useState<SaaSUserAccount | null>(null);
+
+  // Session dédiée du Portail Bailleur (Espace Propriétaire Mandant)
+  const [landlordPortalSession, setLandlordPortalSession] =
+    useState<LandlordPortalSession | null>(null);
+  const [landlordPortalPassword, setLandlordPortalPassword] =
+    useState<string>('');
+  const [isRefreshingLandlordPortal, setIsRefreshingLandlordPortal] =
+    useState(false);
 
   // Écouteur Quota Google Maps Platform (Obligatoire Case A Demo Key)
   useEffect(() => {
@@ -496,6 +512,45 @@ export default function App() {
     }
   };
 
+  const handleLandlordPortalLoginSuccess = useCallback(
+    (session: LandlordPortalSession, passwordUsed: string) => {
+      setLandlordPortalSession(session);
+      setLandlordPortalPassword(passwordUsed);
+      setIsAuthModalOpen(false);
+    },
+    []
+  );
+
+  const handleRefreshLandlordPortal = useCallback(async () => {
+    if (!landlordPortalSession || !landlordPortalPassword) return;
+    setIsRefreshingLandlordPortal(true);
+    try {
+      const res = await fetch('/api/landlord-portal/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          landlordId: landlordPortalSession.landlord.id,
+          password: landlordPortalPassword,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.landlord) {
+          setLandlordPortalSession(data as LandlordPortalSession);
+        }
+      }
+    } catch (err) {
+      console.error('Erreur actualisation Portail Bailleur :', err);
+    } finally {
+      setIsRefreshingLandlordPortal(false);
+    }
+  }, [landlordPortalSession, landlordPortalPassword]);
+
+  const handleLandlordPortalLogout = useCallback(() => {
+    setLandlordPortalSession(null);
+    setLandlordPortalPassword('');
+  }, []);
+
   const handleSettlePayment = async (paymentId: number, method: string) => {
     await performMutationWithOfflineSupport(
       `/api/payments/${paymentId}/settle`,
@@ -539,6 +594,9 @@ export default function App() {
       iban: string;
       commissionRate: number;
       contractHeaderNote: string;
+      portalUsername?: string;
+      portalPassword?: string;
+      portalEnabled?: boolean;
     }
   ) => {
     const isEditing = landlordId !== null;
@@ -644,6 +702,18 @@ export default function App() {
     }
   }, [isSuperAdminAccount, pendingAgenciesCount]);
 
+  // Si un bailleur est connecté à son Portail Propriétaire dédié, afficher directement son espace sécurisé
+  if (landlordPortalSession) {
+    return (
+      <LandlordPortalView
+        session={landlordPortalSession}
+        onRefresh={handleRefreshLandlordPortal}
+        onLogout={handleLandlordPortalLogout}
+        isRefreshing={isRefreshingLandlordPortal}
+      />
+    );
+  }
+
   // Si aucun compte utilisateur n'est connecté au lancement, la première page affichée est la Page de Connexion
   if (!activeAccount) {
     return (
@@ -652,6 +722,7 @@ export default function App() {
         templatesStore={templatesStore}
         activeAccount={null}
         onLoginSuccess={handleAccountLoginSuccess}
+        onLandlordPortalLoginSuccess={handleLandlordPortalLoginSuccess}
         onLogout={handleLogout}
         onGoogleLogin={handleGoogleLoginWithAgency}
         onAgencyRegistered={handleAgencyRegistered}
@@ -961,7 +1032,27 @@ export default function App() {
             </div>
 
             {selectedLandlordObj && (
-              <div className="inline-flex items-center gap-1">
+              <div className="inline-flex items-center gap-1 flex-wrap">
+                {(() => {
+                  const waDetails = buildLandlordPortalWhatsAppDetails({
+                    landlord: selectedLandlordObj,
+                    agencyName:
+                      managementCompany.tradeName ||
+                      managementCompany.companyName,
+                  });
+                  return waDetails.whatsappUrl ? (
+                    <a
+                      href={waDetails.whatsappUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-extrabold text-white bg-emerald-600 border border-emerald-700 rounded-md hover:bg-emerald-700 transition-colors"
+                      title={`Envoyer le compte (${waDetails.portalUsername}) et le mot de passe du Portail Bailleur par WhatsApp`}
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      <span>Accès WhatsApp</span>
+                    </a>
+                  ) : null;
+                })()}
                 <button
                   type="button"
                   onClick={() =>
@@ -1388,6 +1479,10 @@ export default function App() {
                 <LandlordsPanel
                   landlords={landlords}
                   properties={properties}
+                  agencyName={
+                    managementCompany.tradeName || managementCompany.companyName
+                  }
+                  onRefresh={fetchOverviewData}
                   onSaveLandlord={handleSaveLandlord}
                   onDeleteLandlord={handleDeleteLandlord}
                 />
@@ -1452,6 +1547,9 @@ export default function App() {
       {landlordModalState.open && (
         <LandlordFormModal
           initialLandlord={landlordModalState.editing}
+          agencyName={
+            managementCompany.tradeName || managementCompany.companyName
+          }
           onSubmitMutation={performMutationWithOfflineSupport}
           onDeleteLandlord={handleDeleteLandlord}
           onClose={() => setLandlordModalState({ open: false, editing: null })}
@@ -1468,6 +1566,10 @@ export default function App() {
           onCloseModal={() => setIsLandlordsModalOpen(false)}
           landlords={landlords}
           properties={properties}
+          agencyName={
+            managementCompany.tradeName || managementCompany.companyName
+          }
+          onRefresh={fetchOverviewData}
           onSaveLandlord={handleSaveLandlord}
           onDeleteLandlord={handleDeleteLandlord}
         />
@@ -1560,6 +1662,7 @@ export default function App() {
           templatesStore={templatesStore}
           activeAccount={activeAccount}
           onLoginSuccess={handleAccountLoginSuccess}
+          onLandlordPortalLoginSuccess={handleLandlordPortalLoginSuccess}
           onLogout={handleLogout}
           onGoogleLogin={handleGoogleLoginWithAgency}
           onAgencyRegistered={fetchOverviewData}
@@ -2094,12 +2197,14 @@ function PropertyFormModal({
  * ============================================================================ */
 function LandlordFormModal({
   initialLandlord,
+  agencyName,
   onSubmitMutation,
   onDeleteLandlord,
   onClose,
   onSaved,
 }: {
   initialLandlord: Landlord | null;
+  agencyName: string;
   onSubmitMutation: (
     url: string,
     method: 'POST' | 'PUT',
@@ -2118,7 +2223,7 @@ function LandlordFormModal({
   );
   const [email, setEmail] = useState(initialLandlord?.email || '');
   const [phone, setPhone] = useState(
-    initialLandlord?.phone || '+2250700000000'
+    initialLandlord?.phone || '+225 07 00 00 00 00'
   );
   const [address, setAddress] = useState(
     initialLandlord?.address || 'Cocody Ambassades, Abidjan'
@@ -2136,9 +2241,45 @@ function LandlordFormModal({
     initialLandlord?.contractHeaderNote ||
       'Contrat de bail soumis aux dispositions légales en vigueur avec révision triennale.'
   );
+  const [portalUsername, setPortalUsername] = useState(
+    initialLandlord?.portalUsername || ''
+  );
+  const [portalPassword, setPortalPassword] = useState(
+    () => initialLandlord?.portalPassword || generateLandlordPortalPassword()
+  );
+  const [portalEnabled, setPortalEnabled] = useState<boolean>(
+    initialLandlord?.portalEnabled !== false
+  );
   const [submitting, setSubmitting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  const resolvedUsername =
+    portalUsername.trim() ||
+    deriveDefaultLandlordUsername({ email, phone, fullName });
+
+  const waPreview = buildLandlordPortalWhatsAppDetails({
+    landlord: {
+      id: initialLandlord?.id || 0,
+      userId: initialLandlord?.userId || '',
+      fullName: fullName || 'Propriétaire',
+      companyName: companyName || null,
+      email,
+      phone,
+      address,
+      taxId,
+      iban,
+      commissionRate,
+      contractHeaderNote,
+      portalUsername: resolvedUsername,
+      portalPassword,
+      portalEnabled,
+      createdAt: initialLandlord?.createdAt || new Date().toISOString(),
+    },
+    agencyName,
+    overrideUsername: resolvedUsername,
+    overridePassword: portalPassword,
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2162,6 +2303,10 @@ function LandlordFormModal({
           iban,
           commissionRate: Number(commissionRate),
           contractHeaderNote,
+          portalUsername: resolvedUsername,
+          portalPassword:
+            portalPassword.trim() || generateLandlordPortalPassword(),
+          portalEnabled,
         },
         isEditing
           ? `Modification bailleur ${companyName || fullName}`
@@ -2237,7 +2382,7 @@ function LandlordFormModal({
 
           <div>
             <label className="block font-bold text-slate-800 mb-1">
-              Téléphone
+              Téléphone WhatsApp (+225...)
             </label>
             <input
               type="text"
@@ -2246,6 +2391,80 @@ function LandlordFormModal({
               onChange={(e) => setPhone(e.target.value)}
               className="w-full px-3 py-2 border-2 border-slate-300 rounded-lg font-mono font-bold"
             />
+          </div>
+
+          {/* Bloc Accès Portail Bailleur & Envoi WhatsApp */}
+          <div className="sm:col-span-2 p-3.5 bg-emerald-50/70 border-2 border-emerald-200 rounded-xl space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 font-extrabold text-emerald-950 text-xs uppercase tracking-wider">
+                <KeyRound className="w-4 h-4 text-emerald-700" />
+                <span>Accès Portail Bailleur (Suivi des Biens)</span>
+              </div>
+              <label className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-900 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={portalEnabled}
+                  onChange={(e) => setPortalEnabled(e.target.checked)}
+                  className="rounded border-emerald-400 text-emerald-700 focus:ring-emerald-600"
+                />
+                <span>Portail actif</span>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  Compte / Identifiant Portail
+                </label>
+                <input
+                  type="text"
+                  value={portalUsername}
+                  onChange={(e) => setPortalUsername(e.target.value)}
+                  placeholder={resolvedUsername}
+                  className="w-full px-2.5 py-2 bg-white border border-emerald-300 rounded-lg font-mono text-xs font-bold text-slate-950"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  Mot de passe Portail
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    required
+                    value={portalPassword}
+                    onChange={(e) => setPortalPassword(e.target.value)}
+                    className="w-full px-2.5 py-2 bg-white border border-emerald-300 rounded-lg font-mono text-xs font-bold text-slate-950"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPortalPassword(generateLandlordPortalPassword())
+                    }
+                    className="px-2.5 py-2 text-xs font-bold text-emerald-900 bg-white border border-emerald-300 rounded-lg hover:bg-emerald-100 whitespace-nowrap shrink-0"
+                  >
+                    Générer
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {isEditing && waPreview.whatsappUrl && (
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-emerald-200/80">
+                <span className="text-xs text-emerald-900 font-medium">
+                  Transmettre les identifiants enregistrés au bailleur :
+                </span>
+                <a
+                  href={waPreview.whatsappUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-extrabold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 whitespace-nowrap shrink-0"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>Envoyer par WhatsApp</span>
+                </a>
+              </div>
+            )}
           </div>
 
           <div>

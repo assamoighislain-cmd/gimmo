@@ -27,7 +27,11 @@ import {
   deleteLeaseRecord,
   deletePaymentRecord,
   renamePropertyTypeInRecords,
+  upsertLandlordPortalCredentialsRecord,
+  authenticateLandlordPortalRecord,
 } from './src/db/gimmo-repository.ts';
+import { resolveManagementCompany } from './src/lib/document-templates.ts';
+import { buildLandlordPortalWhatsAppDetails } from './src/lib/landlord-portal.ts';
 import { getOrCreateUser } from './src/db/users.ts';
 import { requireAuth, type AuthRequest } from './src/middleware/auth.ts';
 import {
@@ -750,6 +754,146 @@ async function startServer() {
       res.status(201).json({ landlord: created });
     } catch (error: any) {
       res.status(500).json({ error: error.message || 'Erreur création bailleur' });
+    }
+  });
+
+  /**
+   * 9b. Génération / Mise à jour des identifiants Portail Bailleur + Lien d'envoi WhatsApp
+   */
+  app.post('/api/landlords/:id/portal-credentials', async (req, res) => {
+    try {
+      const landlordId = Number(req.params.id);
+      if (isNaN(landlordId)) {
+        return res.status(400).json({ error: 'Identifiant bailleur invalide' });
+      }
+
+      const { portalUsername, portalPassword, portalEnabled, regeneratePassword } =
+        req.body || {};
+
+      const updatedLandlord = await upsertLandlordPortalCredentialsRecord(
+        landlordId,
+        {
+          portalUsername,
+          portalPassword,
+          portalEnabled,
+          regeneratePassword,
+        }
+      );
+
+      const baseUrl =
+        process.env.APP_URL && !process.env.APP_URL.includes('MY_APP_URL')
+          ? process.env.APP_URL.replace(/\/$/, '')
+          : `${req.protocol}://${req.get('host')}`;
+
+      const managementCompany = resolveManagementCompany(
+        getDocumentTemplatesStore()
+      );
+      const whatsapp = buildLandlordPortalWhatsAppDetails({
+        landlord: updatedLandlord as any,
+        agencyName:
+          managementCompany.tradeName || managementCompany.companyName || 'Gimmo',
+        baseUrl,
+      });
+
+      let cloudApiStatus: 'sent_via_cloud_api' | 'ready_via_share_link' =
+        'ready_via_share_link';
+      const waToken = process.env.WHATSAPP_CLOUD_API_TOKEN;
+      const waPhoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+      if (waToken && waPhoneId && whatsapp.sanitizedDigits) {
+        try {
+          const waResponse = await fetch(
+            `https://graph.facebook.com/v21.0/${waPhoneId}/messages`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${waToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                messaging_product: 'whatsapp',
+                recipient_type: 'individual',
+                to: whatsapp.sanitizedDigits,
+                type: 'text',
+                text: {
+                  preview_url: true,
+                  body: whatsapp.messageText,
+                },
+              }),
+            }
+          );
+          if (waResponse.ok) {
+            cloudApiStatus = 'sent_via_cloud_api';
+          }
+        } catch (waErr) {
+          console.warn('WhatsApp Cloud API landlord credentials send skipped:', waErr);
+        }
+      }
+
+      await broadcastRealtimeState(
+        `Accès Portail Bailleur mis à jour : ${updatedLandlord.companyName || updatedLandlord.fullName}`
+      );
+
+      return res.json({
+        success: true,
+        landlord: updatedLandlord,
+        whatsapp,
+        cloudApiStatus,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        error:
+          error.message ||
+          'Erreur lors de la génération des identifiants du Portail Bailleur',
+      });
+    }
+  });
+
+  /**
+   * 9c. Connexion dédiée au Portail Bailleur (lecture seule isolée sur le patrimoine du propriétaire)
+   */
+  app.post('/api/landlord-portal/login', async (req, res) => {
+    try {
+      const { identifier, password } = req.body || {};
+      const portfolio = await authenticateLandlordPortalRecord(
+        String(identifier || ''),
+        String(password || '')
+      );
+      const managementCompany = resolveManagementCompany(
+        getDocumentTemplatesStore()
+      );
+      return res.json({
+        ...portfolio,
+        managementCompany,
+        authenticatedAt: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      return res.status(401).json({
+        error: error.message || 'Identifiant ou mot de passe bailleur invalide.',
+      });
+    }
+  });
+
+  app.post('/api/landlord-portal/refresh', async (req, res) => {
+    try {
+      const { landlordId, password } = req.body || {};
+      const portfolio = await authenticateLandlordPortalRecord(
+        '',
+        String(password || ''),
+        Number(landlordId)
+      );
+      const managementCompany = resolveManagementCompany(
+        getDocumentTemplatesStore()
+      );
+      return res.json({
+        ...portfolio,
+        managementCompany,
+        authenticatedAt: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      return res.status(401).json({
+        error: error.message || 'Session Portail Bailleur expirée.',
+      });
     }
   });
 

@@ -10,7 +10,21 @@ export interface Landlord {
   iban: string | null;
   commissionRate: number;
   contractHeaderNote: string | null;
+  portalUsername?: string | null;
+  portalPassword?: string | null;
+  portalEnabled?: boolean;
+  portalLastLoginAt?: string | null;
   createdAt: string;
+}
+
+export interface LandlordPortalSession {
+  landlord: Landlord;
+  properties: Property[];
+  leases: Lease[];
+  tenants: Tenant[];
+  payments: Payment[];
+  managementCompany: ManagementCompanyProfile;
+  authenticatedAt: string;
 }
 
 export interface Property {
