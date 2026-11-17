@@ -12,6 +12,7 @@ import {
   clearOfflineQueue,
 } from './offline-manager.ts';
 import { DocumentTemplatesStore } from './document-templates.ts';
+import { parseJsonResponseSafely } from './landlord-portal.ts';
 
 export interface RealtimeStatePayload {
   type: 'gimmo:state_updated';
@@ -70,7 +71,11 @@ export function useRealtimeBackgroundSync({
       });
 
       if (res.ok) {
-        const result = await res.json();
+        const parsed = await parseJsonResponseSafely<any>(res);
+        if (!parsed.isJson || !parsed.data) {
+          return false;
+        }
+        const result = parsed.data;
         clearOfflineQueue();
         onQueueSynced();
         if (result.data) {

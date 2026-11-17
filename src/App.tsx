@@ -93,6 +93,8 @@ import {
   generateLandlordPortalPassword,
   deriveDefaultLandlordUsername,
   buildLandlordPortalWhatsAppDetails,
+  parseJsonResponseSafely,
+  authenticateOrRefreshLandlordPortalClient,
 } from './lib/landlord-portal.ts';
 
 type ActiveSection =
@@ -244,12 +246,32 @@ export default function App() {
     try {
       setDataError(null);
       const res = await fetch('/api/gimmo/overview', { cache: 'no-store' });
-      if (!res.ok) {
+      const parsed = await parseJsonResponseSafely<any>(res);
+      if (!res.ok || !parsed.isJson || !parsed.data) {
         throw new Error('Impossible de charger les données PostgreSQL');
       }
-      const data = await res.json();
+      const data = parsed.data;
+      const existingSnap = loadOfflineSnapshot();
+      const hasPendingQueue = getOfflineQueue().length > 0;
+      const incomingLandlords: Landlord[] = data.landlords || [];
+      const mergedLandlords = hasPendingQueue && existingSnap?.landlords
+        ? incomingLandlords.map((rl) => {
+            const localMatch = existingSnap.landlords.find((ll) => ll.id === rl.id);
+            if (!localMatch) return rl;
+            return {
+              ...rl,
+              portalUsername: localMatch.portalUsername || rl.portalUsername,
+              portalPassword: localMatch.portalPassword || rl.portalPassword,
+              portalEnabled:
+                localMatch.portalEnabled !== undefined
+                  ? localMatch.portalEnabled
+                  : rl.portalEnabled,
+            };
+          })
+        : incomingLandlords;
+
       const saved = saveOfflineSnapshot({
-        landlords: data.landlords || [],
+        landlords: mergedLandlords,
         properties: data.properties || [],
         tenants: data.tenants || [],
         leases: data.leases || [],
@@ -354,7 +376,8 @@ export default function App() {
             headers: { 'Content-Type': 'application/json' },
             body: method === 'DELETE' ? undefined : JSON.stringify(body),
           });
-          if (res.ok) {
+          const contentType = res.headers.get('content-type') || '';
+          if (res.ok && contentType.includes('application/json')) {
             await fetchOverviewData();
             return;
           }
@@ -525,20 +548,11 @@ export default function App() {
     if (!landlordPortalSession || !landlordPortalPassword) return;
     setIsRefreshingLandlordPortal(true);
     try {
-      const res = await fetch('/api/landlord-portal/refresh', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          landlordId: landlordPortalSession.landlord.id,
-          password: landlordPortalPassword,
-        }),
+      const updatedSession = await authenticateOrRefreshLandlordPortalClient({
+        explicitLandlordId: landlordPortalSession.landlord.id,
+        password: landlordPortalPassword,
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.landlord) {
-          setLandlordPortalSession(data as LandlordPortalSession);
-        }
-      }
+      setLandlordPortalSession(updatedSession);
     } catch (err) {
       console.error('Erreur actualisation Portail Bailleur :', err);
     } finally {

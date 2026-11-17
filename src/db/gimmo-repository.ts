@@ -956,6 +956,12 @@ export async function updateLandlordRecord(
       .from(landlords)
       .where(eq(landlords.id, landlordId));
     if (!currentRows.length) {
+      if (data.fullName && data.fullName.trim()) {
+        return await createLandlordRecord({
+          userId: 'global_demo',
+          ...data,
+        });
+      }
       throw new Error('Bailleur introuvable');
     }
     const existing = currentRows[0];

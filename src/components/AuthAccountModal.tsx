@@ -38,6 +38,7 @@ import {
   WHATSAPP_COUNTRY_RULES,
   type AgencyWhatsAppNotification,
 } from '../lib/agency-notifications.ts';
+import { authenticateOrRefreshLandlordPortalClient } from '../lib/landlord-portal.ts';
 
 interface AuthAccountModalProps {
   templatesStore: DocumentTemplatesStore;
@@ -254,26 +255,12 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/landlord-portal/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          identifier: landlordIdentifier.trim(),
-          password: landlordPassword.trim(),
-        }),
+      const session = await authenticateOrRefreshLandlordPortalClient({
+        identifier: landlordIdentifier.trim(),
+        password: landlordPassword.trim(),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(
-          data?.error ||
-            'Identifiant ou mot de passe bailleur invalide. Vérifiez le message WhatsApp envoyé par votre agence.'
-        );
-      }
 
-      onLandlordPortalLoginSuccess?.(
-        data as LandlordPortalSession,
-        landlordPassword.trim()
-      );
+      onLandlordPortalLoginSuccess?.(session, landlordPassword.trim());
       onClose?.();
     } catch (err: any) {
       setErrorMsg(

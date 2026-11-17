@@ -28,6 +28,7 @@ import {
   generateLandlordPortalPassword,
   deriveDefaultLandlordUsername,
   buildLandlordPortalWhatsAppDetails,
+  parseJsonResponseSafely,
   type LandlordPortalWhatsAppPayload,
 } from '../lib/landlord-portal.ts';
 
@@ -170,35 +171,85 @@ export const LandlordsPanel: React.FC<LandlordsPanelProps> = ({
   const handleRegenerateCredentials = async (landlord: Landlord) => {
     setRegeneratingId(landlord.id);
     setErrorMsg(null);
+
+    const nextUsername =
+      (landlord.portalUsername || '').trim() ||
+      deriveDefaultLandlordUsername({
+        email: landlord.email,
+        phone: landlord.phone,
+        fullName: landlord.fullName,
+      });
+    const nextPassword = generateLandlordPortalPassword();
+
     try {
-      const res = await fetch(
-        `/api/landlords/${landlord.id}/portal-credentials`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            regeneratePassword: true,
-            portalEnabled: true,
-          }),
+      let handledByPortalEndpoint = false;
+
+      if (typeof navigator === 'undefined' || navigator.onLine) {
+        try {
+          const res = await fetch(
+            `/api/landlords/${landlord.id}/portal-credentials`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                portalUsername: nextUsername,
+                portalPassword: nextPassword,
+                portalEnabled: true,
+              }),
+            }
+          );
+          const parsed = await parseJsonResponseSafely<any>(res);
+
+          if (res.ok && parsed.isJson && parsed.data?.whatsapp) {
+            setVisiblePasswordIds((prev) => ({ ...prev, [landlord.id]: true }));
+            setReadyWhatsappInvite(parsed.data.whatsapp);
+            await onRefresh?.();
+            handledByPortalEndpoint = true;
+          }
+        } catch {
+          // Repli automatique sur la mise à jour standard ci-dessous
         }
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(
-          data.error || 'Impossible de régénérer le mot de passe.'
-        );
       }
-      setVisiblePasswordIds((prev) => ({ ...prev, [landlord.id]: true }));
-      if (data.whatsapp) {
-        setReadyWhatsappInvite(data.whatsapp);
+
+      if (!handledByPortalEndpoint) {
+        await onSaveLandlord(landlord.id, {
+          fullName: landlord.fullName || '',
+          companyName: landlord.companyName || '',
+          email: landlord.email || '',
+          phone: landlord.phone || '',
+          address: landlord.address || '',
+          taxId: landlord.taxId || '',
+          iban: landlord.iban || '',
+          commissionRate: Number(landlord.commissionRate ?? 8),
+          contractHeaderNote: landlord.contractHeaderNote || '',
+          portalUsername: nextUsername,
+          portalPassword: nextPassword,
+          portalEnabled: true,
+        });
+
+        const updatedPreview: Landlord = {
+          ...landlord,
+          portalUsername: nextUsername,
+          portalPassword: nextPassword,
+          portalEnabled: true,
+        };
+        const waInvite = buildLandlordPortalWhatsAppDetails({
+          landlord: updatedPreview,
+          agencyName,
+          overrideUsername: nextUsername,
+          overridePassword: nextPassword,
+        });
+
+        setVisiblePasswordIds((prev) => ({ ...prev, [landlord.id]: true }));
+        setReadyWhatsappInvite(waInvite);
       }
-      await onRefresh?.();
+
       setFeedback(
-        `Nouveau mot de passe Portail généré pour "${landlord.companyName || landlord.fullName}". Cliquez ci-dessous pour l'envoyer sur WhatsApp.`
+        `Mot de passe Portail généré (${nextPassword}) pour "${landlord.companyName || landlord.fullName}". Cliquez sur le bouton vert WhatsApp pour lui envoyer ses accès.`
       );
     } catch (err: any) {
       setErrorMsg(
-        err.message || 'Erreur lors de la régénération des identifiants.'
+        err.message || 'Erreur lors de la génération des identifiants Portail.'
       );
     } finally {
       setRegeneratingId(null);

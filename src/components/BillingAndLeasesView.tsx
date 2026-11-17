@@ -23,6 +23,7 @@ import {
   Sliders,
   Trash2,
 } from 'lucide-react';
+import { parseJsonResponseSafely } from '../lib/landlord-portal.ts';
 
 interface BillingAndLeasesViewProps {
   mode: 'leases' | 'billing';
@@ -104,9 +105,11 @@ export const BillingAndLeasesView: React.FC<BillingAndLeasesViewProps> = ({
       const res = await fetch(`/api/receipts/${paymentId}/whatsapp-share`, {
         method: 'POST',
       });
-      if (!res.ok) throw new Error('Erreur génération lien WhatsApp');
-      const data: WhatsappShareResponse = await res.json();
-      setWhatsappModalData(data);
+      const parsed = await parseJsonResponseSafely<WhatsappShareResponse>(res);
+      if (!res.ok || !parsed.isJson || !parsed.data) {
+        throw new Error('Erreur génération lien WhatsApp');
+      }
+      setWhatsappModalData(parsed.data);
       await onRefresh();
     } catch (err) {
       console.error(err);
@@ -121,9 +124,11 @@ export const BillingAndLeasesView: React.FC<BillingAndLeasesViewProps> = ({
       const res = await fetch(`/api/leases/${leaseId}/whatsapp-share`, {
         method: 'POST',
       });
-      if (!res.ok) throw new Error('Erreur génération lien WhatsApp contrat');
-      const data: WhatsappShareResponse = await res.json();
-      setWhatsappModalData(data);
+      const parsed = await parseJsonResponseSafely<WhatsappShareResponse>(res);
+      if (!res.ok || !parsed.isJson || !parsed.data) {
+        throw new Error('Erreur génération lien WhatsApp contrat');
+      }
+      setWhatsappModalData(parsed.data);
     } catch (err) {
       console.error(err);
     } finally {
