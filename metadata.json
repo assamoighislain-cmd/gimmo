@@ -1,0 +1,10 @@
+{
+  "name": "Gimmo",
+  "description": "Plateforme SaaS de gestion immobilière multi-bailleurs avec cartographie GPS PostGIS, génération automatique de contrats de bail et quittances PDF, suivi des impayés et partage en un clic via l'API WhatsApp Cloud.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
