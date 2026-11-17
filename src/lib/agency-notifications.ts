@@ -239,7 +239,9 @@ export function validateWhatsAppPhone(
   rawInput: string,
   defaultCountryCode = '225'
 ): WhatsAppValidationResult {
-  const trimmed = String(rawInput || '').trim();
+  const trimmed = String(rawInput || '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+    .trim();
   const fallbackRule =
     WHATSAPP_COUNTRY_RULES.find((r) => r.code === defaultCountryCode) ||
     WHATSAPP_COUNTRY_RULES[0];

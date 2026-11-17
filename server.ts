@@ -208,83 +208,87 @@ async function startServer() {
         : [];
 
       for (const item of mutations) {
-        const { url, method, body } = item;
-        if (url === '/api/properties' && method === 'POST') {
-          await createPropertyRecord({ userId: 'global_demo', ...body });
-        } else if (url?.startsWith('/api/properties/') && method === 'PUT') {
-          const id = Number(url.split('/').pop());
-          await updatePropertyRecord(id, body);
-        } else if (url === '/api/landlords' && method === 'POST') {
-          await createLandlordRecord({ userId: 'global_demo', ...body });
-        } else if (url?.startsWith('/api/landlords/') && method === 'PUT') {
-          const id = Number(url.split('/').pop());
-          await updateLandlordRecord(id, body);
-        } else if (url === '/api/tenants-leases' && method === 'POST') {
-          await createTenantAndLeaseRecord({ userId: 'global_demo', ...body });
-        } else if (url?.startsWith('/api/tenants-leases/') && method === 'PUT') {
-          const id = Number(url.split('/').pop());
-          await updateTenantAndLeaseRecord(id, body);
-        } else if (url === '/api/payments' && method === 'POST') {
-          await createPaymentRecord({ userId: 'global_demo', ...body });
-        } else if (url?.endsWith('/settle') && method === 'POST') {
-          const parts = url.split('/');
-          const paymentId = Number(parts[parts.length - 2]);
-          await markPaymentAsPaid(paymentId, body?.paymentMethod || 'Mobile Money');
-        } else if (url?.startsWith('/api/payments/') && method === 'PUT') {
-          const id = Number(url.split('/').pop());
-          await updatePaymentRecord(id, body);
-        } else if (url === '/api/templates' && method === 'PUT') {
-          saveDocumentTemplateEntry(body);
-        } else if (url === '/api/accounting-months' && method === 'POST') {
-          upsertAccountingMonthEntry(body);
-          if (body?.autoGenerateRentCalls) {
-            await generateRentCallsForMonthRecord({
-              userId: 'global_demo',
-              periodMonth: body.periodMonth,
-              periodLabel: body.periodLabel,
-              defaultDueDay: Number(body.defaultDueDay || 5),
-              initialStatus: body.initialStatus || 'pending',
-            });
+        try {
+          const { url, method, body } = item;
+          if (url === '/api/properties' && method === 'POST') {
+            await createPropertyRecord({ userId: 'global_demo', ...body });
+          } else if (url?.startsWith('/api/properties/') && method === 'PUT') {
+            const id = Number(url.split('/').pop());
+            await updatePropertyRecord(id, body);
+          } else if (url === '/api/landlords' && method === 'POST') {
+            await createLandlordRecord({ userId: 'global_demo', ...body });
+          } else if (url?.startsWith('/api/landlords/') && method === 'PUT') {
+            const id = Number(url.split('/').pop());
+            await updateLandlordRecord(id, body);
+          } else if (url === '/api/tenants-leases' && method === 'POST') {
+            await createTenantAndLeaseRecord({ userId: 'global_demo', ...body });
+          } else if (url?.startsWith('/api/tenants-leases/') && method === 'PUT') {
+            const id = Number(url.split('/').pop());
+            await updateTenantAndLeaseRecord(id, body);
+          } else if (url === '/api/payments' && method === 'POST') {
+            await createPaymentRecord({ userId: 'global_demo', ...body });
+          } else if (url?.endsWith('/settle') && method === 'POST') {
+            const parts = url.split('/');
+            const paymentId = Number(parts[parts.length - 2]);
+            await markPaymentAsPaid(paymentId, body?.paymentMethod || 'Mobile Money');
+          } else if (url?.startsWith('/api/payments/') && method === 'PUT') {
+            const id = Number(url.split('/').pop());
+            await updatePaymentRecord(id, body);
+          } else if (url === '/api/templates' && method === 'PUT') {
+            saveDocumentTemplateEntry(body);
+          } else if (url === '/api/accounting-months' && method === 'POST') {
+            upsertAccountingMonthEntry(body);
+            if (body?.autoGenerateRentCalls) {
+              await generateRentCallsForMonthRecord({
+                userId: 'global_demo',
+                periodMonth: body.periodMonth,
+                periodLabel: body.periodLabel,
+                defaultDueDay: Number(body.defaultDueDay || 5),
+                initialStatus: body.initialStatus || 'pending',
+              });
+            }
+          } else if (url?.startsWith('/api/properties/') && method === 'DELETE') {
+            const id = Number(url.split('/').pop());
+            await deletePropertyRecord(id);
+          } else if (url?.startsWith('/api/landlords/') && method === 'DELETE') {
+            const id = Number(url.split('/').pop());
+            await deleteLandlordRecord(id);
+          } else if (url?.startsWith('/api/tenants-leases/') && method === 'DELETE') {
+            const id = Number(url.split('/').pop());
+            await deleteLeaseRecord(id);
+          } else if (url?.startsWith('/api/payments/') && method === 'DELETE') {
+            const id = Number(url.split('/').pop());
+            await deletePaymentRecord(id);
+          } else if (url?.startsWith('/api/accounting-months/') && method === 'DELETE') {
+            const periodMonth = decodeURIComponent(url.split('/').pop() || '');
+            deleteAccountingMonthEntry(periodMonth);
+          } else if (url === '/api/property-types' && method === 'POST') {
+            upsertPropertyTypeEntry(body);
+            if (body?.previousName && body.previousName !== body.name) {
+              await renamePropertyTypeInRecords(body.previousName, body.name);
+            }
+          } else if (url?.startsWith('/api/property-types/') && method === 'DELETE') {
+            const id = decodeURIComponent(url.split('/').pop() || '');
+            deletePropertyTypeEntry(id);
+          } else if (url === '/api/management-company' && method === 'PUT') {
+            saveManagementCompanyEntry(body || {});
+          } else if (url === '/api/saas/tenants' && method === 'POST') {
+            if (body?.companyName) {
+              upsertSaaSTenantEntry(body);
+            }
+          } else if (url?.startsWith('/api/saas/tenants/') && method === 'DELETE') {
+            const id = decodeURIComponent(url.split('/').pop() || '');
+            deleteSaaSTenantEntry(id);
+          } else if (url === '/api/saas/users' && method === 'POST') {
+            if (body?.email && body?.fullName) {
+              upsertSaaSUserEntry(body);
+            }
+          } else if (url?.startsWith('/api/saas/users/') && method === 'DELETE') {
+            const id = decodeURIComponent(url.split('/').pop() || '');
+            deleteSaaSUserEntry(id);
           }
-        } else if (url?.startsWith('/api/properties/') && method === 'DELETE') {
-          const id = Number(url.split('/').pop());
-          await deletePropertyRecord(id);
-        } else if (url?.startsWith('/api/landlords/') && method === 'DELETE') {
-          const id = Number(url.split('/').pop());
-          await deleteLandlordRecord(id);
-        } else if (url?.startsWith('/api/tenants-leases/') && method === 'DELETE') {
-          const id = Number(url.split('/').pop());
-          await deleteLeaseRecord(id);
-        } else if (url?.startsWith('/api/payments/') && method === 'DELETE') {
-          const id = Number(url.split('/').pop());
-          await deletePaymentRecord(id);
-        } else if (url?.startsWith('/api/accounting-months/') && method === 'DELETE') {
-          const periodMonth = decodeURIComponent(url.split('/').pop() || '');
-          deleteAccountingMonthEntry(periodMonth);
-        } else if (url === '/api/property-types' && method === 'POST') {
-          upsertPropertyTypeEntry(body);
-          if (body?.previousName && body.previousName !== body.name) {
-            await renamePropertyTypeInRecords(body.previousName, body.name);
-          }
-        } else if (url?.startsWith('/api/property-types/') && method === 'DELETE') {
-          const id = decodeURIComponent(url.split('/').pop() || '');
-          deletePropertyTypeEntry(id);
-        } else if (url === '/api/management-company' && method === 'PUT') {
-          saveManagementCompanyEntry(body || {});
-        } else if (url === '/api/saas/tenants' && method === 'POST') {
-          if (body?.companyName) {
-            upsertSaaSTenantEntry(body);
-          }
-        } else if (url?.startsWith('/api/saas/tenants/') && method === 'DELETE') {
-          const id = decodeURIComponent(url.split('/').pop() || '');
-          deleteSaaSTenantEntry(id);
-        } else if (url === '/api/saas/users' && method === 'POST') {
-          if (body?.email && body?.fullName) {
-            upsertSaaSUserEntry(body);
-          }
-        } else if (url?.startsWith('/api/saas/users/') && method === 'DELETE') {
-          const id = decodeURIComponent(url.split('/').pop() || '');
-          deleteSaaSUserEntry(id);
+        } catch (mutationErr) {
+          console.warn('Skipping failed queued mutation during batch sync:', mutationErr);
         }
       }
 

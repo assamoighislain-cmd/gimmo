@@ -327,6 +327,7 @@ export function upsertSaaSTenantEntry(
 export function deleteSaaSTenantEntry(id: string): DocumentTemplatesStore {
   const current = getDocumentTemplatesStore();
   const existingList = resolveSaaSTenants(current);
+  const existingUsers = resolveSaaSUsers(current);
   const nowIso = new Date().toISOString();
 
   let updatedList = existingList.filter((item) => item.id !== id);
@@ -336,6 +337,24 @@ export function deleteSaaSTenantEntry(id: string): DocumentTemplatesStore {
     updatedList[0] = { ...updatedList[0], isCurrentTenant: true };
   }
 
+  const fallbackTenant = updatedList.find((t) => t.isCurrentTenant) || updatedList[0];
+  const updatedUsers = existingUsers
+    .filter(
+      (u) =>
+        u.tenantId !== id ||
+        u.role === 'super_admin' ||
+        u.email.trim().toLowerCase() === 'assamoighislain@gmail.com'
+    )
+    .map((u) =>
+      u.tenantId === id
+        ? {
+            ...u,
+            tenantId: fallbackTenant.id,
+            tenantName: fallbackTenant.companyName,
+          }
+        : u
+    );
+
   const next: DocumentTemplatesStore = {
     leases: { ...current.leases },
     receipts: { ...current.receipts },
@@ -343,7 +362,7 @@ export function deleteSaaSTenantEntry(id: string): DocumentTemplatesStore {
     propertyTypes: resolvePropertyTypes(current),
     managementCompany: resolveManagementCompany(current),
     saasTenants: updatedList,
-    saasUsers: resolveSaaSUsers(current),
+    saasUsers: updatedUsers,
     updatedAt: nowIso,
   };
 
@@ -370,6 +389,9 @@ export function upsertSaaSUserEntry(
     tenants.find((t) => t.isCurrentTenant) ||
     tenants[0];
 
+  const isMainSuperAdmin =
+    payload.email.trim().toLowerCase() === 'assamoighislain@gmail.com';
+
   let updatedList: SaaSUserAccount[];
   if (existingIdx >= 0) {
     updatedList = existingList.map((item, idx) => {
@@ -379,7 +401,7 @@ export function upsertSaaSUserEntry(
         fullName: payload.fullName.trim(),
         email: payload.email.trim(),
         whatsappPhone: payload.whatsappPhone ?? item.whatsappPhone,
-        role: payload.role || item.role,
+        role: isMainSuperAdmin ? 'super_admin' : payload.role || item.role,
         tenantId: matchedTenant?.id || item.tenantId,
         tenantName: matchedTenant?.companyName || item.tenantName,
         status: payload.status || item.status,
@@ -391,7 +413,7 @@ export function upsertSaaSUserEntry(
       fullName: payload.fullName.trim(),
       email: payload.email.trim(),
       whatsappPhone: payload.whatsappPhone,
-      role: payload.role || 'agency_admin',
+      role: isMainSuperAdmin ? 'super_admin' : payload.role || 'agency_admin',
       tenantId: matchedTenant?.id || 'tenant_gimmo_prestige',
       tenantName: matchedTenant?.companyName || 'GIMMO PRESTIGE IMMOBILIER SARL',
       status: payload.status || 'active',
