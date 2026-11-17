@@ -26,7 +26,6 @@ import {
 import { PropertyMapView } from './components/PropertyMapView.tsx';
 import { BillingAndLeasesView } from './components/BillingAndLeasesView.tsx';
 import { FinancialRecoveryView } from './components/FinancialRecoveryView.tsx';
-import { ArchitectureView } from './components/ArchitectureView.tsx';
 import { PWAInstallButton } from './components/PWAInstallButton.tsx';
 import { DocumentTemplateModal } from './components/DocumentTemplateModal.tsx';
 import { AccountingMonthsPanel } from './components/AccountingMonthsPanel.tsx';
@@ -1429,8 +1428,6 @@ export default function App() {
                   }}
                   onDeleteAccountingMonth={handleDeleteAccountingMonth}
                 />
-
-                <ArchitectureView />
               </div>
             )}
           </>
