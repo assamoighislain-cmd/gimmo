@@ -29,7 +29,11 @@ import {
   interpolateTemplateVariables,
 } from '../lib/document-templates.ts';
 import { validateWhatsAppPhone } from '../lib/agency-notifications.ts';
+import { db } from '../db/index.ts';
+import { appSettings } from '../db/schema.ts';
+import { eq } from 'drizzle-orm';
 
+const SAAS_SETTINGS_ROW_ID = 'gimmo_saas_store';
 const TEMPLATES_FILE_PATH = path.resolve(
   process.cwd(),
   '.gimmo-document-templates.json'
@@ -37,13 +41,69 @@ const TEMPLATES_FILE_PATH = path.resolve(
 
 let memoryTemplatesStore: DocumentTemplatesStore | null = null;
 
+function normalizeLoadedStore(parsed: DocumentTemplatesStore): DocumentTemplatesStore {
+  if (!parsed.accountingMonths || parsed.accountingMonths.length === 0) {
+    parsed.accountingMonths = [...DEFAULT_ACCOUNTING_MONTHS];
+  }
+  if (!parsed.propertyTypes || parsed.propertyTypes.length === 0) {
+    parsed.propertyTypes = [...DEFAULT_PROPERTY_TYPES];
+  }
+  if (!parsed.managementCompany || !parsed.managementCompany.companyName) {
+    parsed.managementCompany = { ...DEFAULT_MANAGEMENT_COMPANY };
+  }
+  if (!parsed.saasTenants || parsed.saasTenants.length === 0) {
+    parsed.saasTenants = [...DEFAULT_SAAS_TENANTS];
+  }
+  if (!parsed.saasUsers || parsed.saasUsers.length === 0) {
+    parsed.saasUsers = [...DEFAULT_SAAS_USERS];
+  }
+  return parsed;
+}
+
+export async function initTemplatesStoreFromDb(): Promise<DocumentTemplatesStore> {
+  try {
+    const rows = await db
+      .select()
+      .from(appSettings)
+      .where(eq(appSettings.id, SAAS_SETTINGS_ROW_ID));
+    if (rows.length > 0 && rows[0].storeJson) {
+      const parsed = JSON.parse(rows[0].storeJson) as DocumentTemplatesStore;
+      if (parsed && parsed.leases && parsed.receipts) {
+        memoryTemplatesStore = normalizeLoadedStore(parsed);
+        return memoryTemplatesStore;
+      }
+    }
+  } catch (err) {
+    console.warn('Could not load SaaS store from Cloud SQL app_settings:', err);
+  }
+  return getDocumentTemplatesStore();
+}
+
 function persistTemplatesStore(next: DocumentTemplatesStore): DocumentTemplatesStore {
   memoryTemplatesStore = next;
+  const serialized = JSON.stringify(next, null, 2);
   try {
-    fs.writeFileSync(TEMPLATES_FILE_PATH, JSON.stringify(next, null, 2), 'utf-8');
+    fs.writeFileSync(TEMPLATES_FILE_PATH, serialized, 'utf-8');
   } catch (err) {
     console.warn('Could not persist .gimmo-document-templates.json:', err);
   }
+  // Persistance durable dans Cloud SQL (table app_settings)
+  db.insert(appSettings)
+    .values({
+      id: SAAS_SETTINGS_ROW_ID,
+      storeJson: serialized,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: appSettings.id,
+      set: {
+        storeJson: serialized,
+        updatedAt: new Date(),
+      },
+    })
+    .catch((err) => {
+      console.warn('Could not persist SaaS store to Cloud SQL app_settings:', err);
+    });
   return next;
 }
 
@@ -56,23 +116,8 @@ export function getDocumentTemplatesStore(): DocumentTemplatesStore {
       const raw = fs.readFileSync(TEMPLATES_FILE_PATH, 'utf-8');
       const parsed = JSON.parse(raw) as DocumentTemplatesStore;
       if (parsed && parsed.leases && parsed.receipts) {
-        if (!parsed.accountingMonths || parsed.accountingMonths.length === 0) {
-          parsed.accountingMonths = [...DEFAULT_ACCOUNTING_MONTHS];
-        }
-        if (!parsed.propertyTypes || parsed.propertyTypes.length === 0) {
-          parsed.propertyTypes = [...DEFAULT_PROPERTY_TYPES];
-        }
-        if (!parsed.managementCompany || !parsed.managementCompany.companyName) {
-          parsed.managementCompany = { ...DEFAULT_MANAGEMENT_COMPANY };
-        }
-        if (!parsed.saasTenants || parsed.saasTenants.length === 0) {
-          parsed.saasTenants = [...DEFAULT_SAAS_TENANTS];
-        }
-        if (!parsed.saasUsers || parsed.saasUsers.length === 0) {
-          parsed.saasUsers = [...DEFAULT_SAAS_USERS];
-        }
-        memoryTemplatesStore = parsed;
-        return parsed;
+        memoryTemplatesStore = normalizeLoadedStore(parsed);
+        return memoryTemplatesStore;
       }
     }
   } catch (err) {

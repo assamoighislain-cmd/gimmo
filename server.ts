@@ -35,6 +35,7 @@ import {
   streamLeaseContractPdf,
   streamFinancialReportPdf,
   streamUserGuidePdf,
+  initTemplatesStoreFromDb,
   getDocumentTemplatesStore,
   saveDocumentTemplateEntry,
   saveManagementCompanyEntry,
@@ -59,6 +60,7 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json());
+  await initTemplatesStoreFromDb();
 
   const getDashboardDataWithTemplates = async () => {
     const dbData = await getAllDashboardData();

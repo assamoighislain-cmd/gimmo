@@ -228,7 +228,7 @@ export default function App() {
 
     try {
       setDataError(null);
-      const res = await fetch('/api/gimmo/overview');
+      const res = await fetch('/api/gimmo/overview', { cache: 'no-store' });
       if (!res.ok) {
         throw new Error('Impossible de charger les données PostgreSQL');
       }
@@ -408,6 +408,24 @@ export default function App() {
       await fetchOverviewData();
     },
     [fetchOverviewData]
+  );
+
+  const handleAgencyRegistered = useCallback(
+    async (updatedTemplates?: DocumentTemplatesStore) => {
+      if (updatedTemplates) {
+        setTemplatesStore(updatedTemplates);
+        saveOfflineSnapshot({
+          landlords,
+          properties,
+          tenants,
+          leases,
+          payments,
+          templates: updatedTemplates,
+        });
+      }
+      await fetchOverviewData();
+    },
+    [fetchOverviewData, landlords, properties, tenants, leases, payments]
   );
 
   const handleGoogleLoginWithAgency = async (targetTenantId: string) => {
@@ -637,7 +655,7 @@ export default function App() {
         onLoginSuccess={handleAccountLoginSuccess}
         onLogout={handleLogout}
         onGoogleLogin={handleGoogleLoginWithAgency}
-        onAgencyRegistered={fetchOverviewData}
+        onAgencyRegistered={handleAgencyRegistered}
       />
     );
   }

@@ -13,8 +13,19 @@ import {
 import { normalizeUserRole } from './rbac.ts';
 import { validateWhatsAppPhone } from './agency-notifications.ts';
 
-const OFFLINE_CACHE_KEY = 'gimmo_offline_cache_v1';
-const OFFLINE_QUEUE_KEY = 'gimmo_offline_queue_v1';
+const OFFLINE_CACHE_KEY = 'gimmo_offline_cache_v3';
+const OFFLINE_QUEUE_KEY = 'gimmo_offline_queue_v3';
+
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem('gimmo_offline_cache_v1');
+    localStorage.removeItem('gimmo_offline_queue_v1');
+    localStorage.removeItem('gimmo_offline_cache_v2');
+    localStorage.removeItem('gimmo_offline_queue_v2');
+  } catch {
+    // ignore storage cleanup errors
+  }
+}
 
 export interface GimmoOverviewSnapshot {
   landlords: Landlord[];
@@ -119,11 +130,19 @@ export function applyOptimisticMutationToSnapshot(
   method: 'POST' | 'PUT' | 'DELETE',
   body: Record<string, any>
 ): GimmoOverviewSnapshot | null {
-  const snapshot = loadOfflineSnapshot();
-  if (!snapshot) return null;
+  const nowIso = new Date().toISOString();
+  const snapshot: GimmoOverviewSnapshot = loadOfflineSnapshot() || {
+    landlords: [],
+    properties: [],
+    tenants: [],
+    leases: [],
+    payments: [],
+    users: [],
+    templates: createInitialTemplatesStore(),
+    lastSyncedAt: nowIso,
+  };
 
   const tempId = Math.floor(Date.now() / 1000);
-  const nowIso = new Date().toISOString();
 
   // 1. Biens Immobiliers (POST /api/properties ou PUT /api/properties/:id)
   if (url === '/api/properties' && method === 'POST') {
@@ -805,30 +824,87 @@ export async function executeMutation(
 ): Promise<{ ok: boolean; queuedOffline?: boolean; data?: any; error?: string }> {
   if (!navigator.onLine) {
     enqueueOfflineMutation({ url, method, body, description });
-    applyOptimisticMutationToSnapshot(url, method, body);
-    return { ok: true, queuedOffline: true };
+    const snap = applyOptimisticMutationToSnapshot(url, method, body);
+    return {
+      ok: true,
+      queuedOffline: true,
+      data: snap?.templates ? { templates: snap.templates } : {},
+    };
   }
 
-  try {
-    const response = await fetch(url, {
+  const sendFetch = () =>
+    fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: method === 'DELETE' ? undefined : JSON.stringify(body),
     });
+
+  try {
+    let response = await sendFetch();
+
+    // Si le proxy renvoie un 404/502/503/504 HTML transitoire (ex: réveil serveur ou hôte statique non redéployé)
+    if (
+      !response.ok &&
+      (response.status === 404 ||
+        response.status === 502 ||
+        response.status === 503 ||
+        response.status === 504)
+    ) {
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        response = await sendFetch();
+      }
+    }
+
     if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
+      const contentType = response.headers.get('content-type') || '';
+      const errData = contentType.includes('application/json')
+        ? await response.json().catch(() => ({}))
+        : {};
+
+      // Erreur métier explicite renvoyée par Express (ex: 400 clé unique ou WhatsApp invalide)
+      if (errData && typeof errData.error === 'string' && errData.error.trim()) {
+        return {
+          ok: false,
+          error: errData.error,
+        };
+      }
+
+      // Si un hôte statique/prévisualisation non redéployé répond encore 404/502/503/504 sans JSON API,
+      // bascule transparente en persistance locale + file de synchronisation sans bloquer la création d'agence
+      if (
+        response.status === 404 ||
+        response.status === 502 ||
+        response.status === 503 ||
+        response.status === 504
+      ) {
+        enqueueOfflineMutation({ url, method, body, description });
+        const snap = applyOptimisticMutationToSnapshot(url, method, body);
+        return {
+          ok: true,
+          queuedOffline: true,
+          data: snap?.templates ? { templates: snap.templates } : {},
+        };
+      }
+
       return {
         ok: false,
-        error: errData.error || `Erreur HTTP ${response.status}`,
+        error: `Erreur HTTP ${response.status}`,
       };
     }
+
     const data = await response.json().catch(() => ({}));
     applyOptimisticMutationToSnapshot(url, method, body);
     return { ok: true, queuedOffline: false, data };
   } catch {
     enqueueOfflineMutation({ url, method, body, description });
-    applyOptimisticMutationToSnapshot(url, method, body);
-    return { ok: true, queuedOffline: true };
+    const snap = applyOptimisticMutationToSnapshot(url, method, body);
+    return {
+      ok: true,
+      queuedOffline: true,
+      data: snap?.templates ? { templates: snap.templates } : {},
+    };
   }
 }
 

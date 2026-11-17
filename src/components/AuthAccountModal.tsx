@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   X,
   LogIn,
@@ -7,6 +7,7 @@ import {
   UserCheck,
   UserPlus,
   CheckCircle2,
+  AlertTriangle,
   Mail,
   Lock,
   ShieldCheck,
@@ -38,7 +39,7 @@ interface AuthAccountModalProps {
   templatesStore: DocumentTemplatesStore;
   activeAccount: SaaSUserAccount | null;
   onLoginSuccess: (account: SaaSUserAccount, agency: SaaSTenantAgency) => Promise<void>;
-  onAgencyRegistered?: () => Promise<void>;
+  onAgencyRegistered?: (updatedTemplates?: DocumentTemplatesStore) => Promise<void>;
   onLogout: () => Promise<void>;
   onGoogleLogin: (targetTenantId: string) => Promise<void>;
   onClose?: () => void;
@@ -78,8 +79,8 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
   const [newAgencyName, setNewAgencyName] = useState('');
   const [newAgencyRccm, setNewAgencyRccm] = useState('');
   const [newAgencyTaxId, setNewAgencyTaxId] = useState('');
-  const [newAgencyAddress, setNewAgencyAddress] = useState('Cocody Riviera');
-  const [newAgencyCity, setNewAgencyCity] = useState('Abidjan');
+  const [newAgencyLocation, setNewAgencyLocation] = useState('Cocody Riviera, Abidjan');
+  const bodyScrollRef = useRef<HTMLDivElement | null>(null);
 
   const selectedCountryRule =
     WHATSAPP_COUNTRY_RULES.find((r) => r.code === whatsappCountryCode) ||
@@ -87,6 +88,11 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
   const liveWhatsappValidation = newAgencyWhatsapp.trim()
     ? validateWhatsAppPhone(newAgencyWhatsapp, whatsappCountryCode)
     : null;
+
+  const typedAgencyCandidate = newAgencyName.trim().toUpperCase();
+  const isDuplicateAgencyName = typedAgencyCandidate
+    ? tenants.some((t) => t.companyName.trim().toUpperCase() === typedAgencyCandidate)
+    : false;
 
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -163,9 +169,17 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
       return;
     }
 
-    const foundUser = users.find(
-      (u) => u.email.trim().toLowerCase() === normalizedEmail
-    );
+    const foundUser =
+      normalizedEmail === 'assamoighislain@gmail.com'
+        ? users.find(
+            (u) =>
+              u.email.trim().toLowerCase() === normalizedEmail &&
+              u.role === 'super_admin'
+          ) ||
+          users.find((u) => u.email.trim().toLowerCase() === normalizedEmail)
+        : [...users]
+            .reverse()
+            .find((u) => u.email.trim().toLowerCase() === normalizedEmail);
 
     if (foundUser) {
       if (foundUser.status === 'suspended') {
@@ -210,8 +224,8 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
     setApprovalPendingNotice(null);
     setCreatedNotification(null);
 
-    if (!regFullName.trim() || !regEmail.trim()) {
-      setErrorMsg('Le nom complet et l’email sont obligatoires.');
+    if (!regFullName.trim()) {
+      setErrorMsg('Veuillez saisir le nom et prénom du Directeur d’Agence.');
       return;
     }
 
@@ -228,32 +242,32 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
     }
 
     const normalizedEmail = regEmail.trim().toLowerCase();
-    const existingEmailUser = users.find(
-      (u) => u.email.trim().toLowerCase() === normalizedEmail
-    );
-    if (existingEmailUser) {
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       setErrorMsg(
-        `Un compte utilisateur existe déjà avec l’adresse email « ${normalizedEmail} ».`
+        'Veuillez saisir une adresse email professionnelle valide (ex: direction@agence.ci).'
       );
       return;
     }
 
-    if (!newAgencyName.trim()) {
-      setErrorMsg('Veuillez saisir le nom de l’agence immobilière.');
+    if (!regPassword.trim()) {
+      setErrorMsg('Veuillez saisir un mot de passe pour le compte de l’agence.');
       return;
     }
 
-    // Clé unique : le nom de l'agence immobilière doit être strictement unique
+    if (!newAgencyName.trim()) {
+      setErrorMsg('Veuillez saisir le nom unique de l’agence immobilière.');
+      return;
+    }
+
+    // Clé unique : seul le nom de l'agence immobilière est une clé unique
     const typedAgencyUpper = newAgencyName.trim().toUpperCase();
     const duplicateAgency = tenants.find(
-      (t) =>
-        t.companyName.trim().toUpperCase() === typedAgencyUpper ||
-        t.tradeName.trim().toUpperCase() === typedAgencyUpper
+      (t) => t.companyName.trim().toUpperCase() === typedAgencyUpper
     );
 
     if (duplicateAgency) {
       setErrorMsg(
-        `Le nom d’agence « ${typedAgencyUpper} » est déjà utilisé. Le nom de l’agence immobilière est une clé unique : veuillez saisir un nom d’agence unique.`
+        `Le nom d’agence « ${typedAgencyUpper} » est déjà utilisé. Le nom de l’agence immobilière est une clé unique : veuillez saisir un autre nom d’agence.`
       );
       return;
     }
@@ -275,6 +289,10 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
       const nowIso = new Date().toISOString();
       const cleanWhatsapp = waValidation.formattedDisplay;
 
+      const locParts = newAgencyLocation.split(',');
+      const parsedAddress = locParts[0]?.trim() || 'Cocody Riviera';
+      const parsedCity = locParts.slice(1).join(',').trim() || 'Abidjan';
+
       const newAgencyPayload: SaaSTenantAgency = {
         id: createdTenantId,
         companyName: typedAgencyUpper,
@@ -287,8 +305,8 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
         ownerEmail: normalizedEmail,
         phone: cleanWhatsapp,
         whatsappPhone: cleanWhatsapp,
-        address: newAgencyAddress.trim() || 'Cocody',
-        city: newAgencyCity.trim() || 'Abidjan',
+        address: parsedAddress,
+        city: parsedCity,
         plan: 'pro',
         status: initialAgencyStatus,
         maxProperties: 100,
@@ -302,12 +320,13 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
       const tenantRes = await executeMutation(
         '/api/saas/tenants',
         'POST',
-        newAgencyPayload
+        newAgencyPayload,
+        `Création agence ${newAgencyPayload.companyName}`
       );
       if (!tenantRes.ok) {
         throw new Error(
           tenantRes.error ||
-            'Ce nom d’agence immobilière existe déjà (clé unique).'
+            'Impossible d’enregistrer cette agence immobilière.'
         );
       }
 
@@ -324,8 +343,18 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
         createdAt: nowIso.split('T')[0],
       };
 
-      await executeMutation('/api/saas/users', 'POST', newUserAccount);
-      await onAgencyRegistered?.();
+      const userRes = await executeMutation(
+        '/api/saas/users',
+        'POST',
+        newUserAccount,
+        `Création compte Directeur d'Agence ${newUserAccount.fullName}`
+      );
+
+      const latestTemplates =
+        (userRes.data?.templates as DocumentTemplatesStore | undefined) ||
+        (tenantRes.data?.templates as DocumentTemplatesStore | undefined);
+
+      await onAgencyRegistered?.(latestTemplates);
 
       // 1. Déclenchement immédiat de la notification sonore à la création de l'agence immobilière
       playAgencyCreatedSound();
@@ -335,15 +364,20 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
         buildAgencyCreatedWhatsAppDetails(newAgencyPayload);
       setCreatedNotification(whatsappNotification);
 
-      if (isSuperAdminEmail) {
-        await onLoginSuccess(newUserAccount, newAgencyPayload);
-        onClose?.();
-      } else {
-        setTab('login');
-        setLoginEmail(normalizedEmail);
-        setApprovalPendingNotice(
-          `Agence « ${newAgencyPayload.companyName} » enregistrée avec succès (Rôle par défaut : Directeur d’Agence · WhatsApp : ${cleanWhatsapp}). Une notification sonore a été émise et le message WhatsApp est prêt ci-dessous. Seul le Super Admin (assamoighislain@gmail.com) a le droit d’approuver votre agence.`
-        );
+      // Réinitialise les champs du formulaire après création réussie
+      setNewAgencyName('');
+      setRegPassword('');
+
+      setTab('login');
+      setLoginEmail(normalizedEmail);
+      setApprovalPendingNotice(
+        isSuperAdminEmail
+          ? `Agence « ${newAgencyPayload.companyName} » créée et activée immédiatement par le Super Admin (WhatsApp : ${cleanWhatsapp}). Une notification sonore a été émise et le message WhatsApp est prêt ci-dessous.`
+          : `Agence « ${newAgencyPayload.companyName} » enregistrée avec succès (Rôle par défaut : Directeur d’Agence · WhatsApp : ${cleanWhatsapp}). Une notification sonore a été émise et le message WhatsApp est prêt ci-dessous. Seul le Super Admin (assamoighislain@gmail.com) a le droit d’approuver votre agence.`
+      );
+      bodyScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      if (typeof window !== 'undefined') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Erreur lors de la création du compte.');
@@ -447,10 +481,11 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
       </div>
 
       {/* Corps */}
-      <div className="p-6 overflow-y-auto space-y-5 flex-1">
+      <div ref={bodyScrollRef} className="p-6 overflow-y-auto space-y-5 flex-1">
         {errorMsg && (
-          <div className="p-3 bg-rose-50 border border-rose-200 rounded-md text-xs font-semibold text-rose-800">
-            {errorMsg}
+          <div className="p-3 bg-rose-50 border border-rose-200 rounded-md text-xs font-semibold text-rose-800 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{errorMsg}</span>
           </div>
         )}
 
@@ -592,7 +627,7 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
           </div>
         ) : (
           /* Formulaire de création de compte : sans menu déroulant Fonction, rôle Directeur d'Agence par défaut, nom de l'agence clé unique, et numéro WhatsApp obligatoire */
-          <form onSubmit={handleRegisterSubmit} className="space-y-4">
+          <form noValidate onSubmit={handleRegisterSubmit} className="space-y-4">
             <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-md text-xs text-indigo-950 space-y-1">
               <div className="font-bold flex items-center justify-between">
                 <span>Rôle attribué par défaut à la création :</span>
@@ -645,7 +680,7 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
                     value={newAgencyWhatsapp}
                     onChange={(e) => {
                       const sanitizedInput = e.target.value.replace(
-                        /[^0-9+\s()-]/g,
+                        /[^0-9+.\s()-]/g,
                         ''
                       );
                       setNewAgencyWhatsapp(sanitizedInput);
@@ -733,8 +768,33 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
                   value={newAgencyName}
                   onChange={(e) => setNewAgencyName(e.target.value)}
                   placeholder="Saisissez le nom unique de votre agence immobilière"
-                  className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-md focus:outline-none focus:border-indigo-600 font-bold text-slate-900"
+                  className={`w-full px-3 py-2 text-xs bg-white border rounded-md focus:outline-none font-bold text-slate-900 ${
+                    isDuplicateAgencyName
+                      ? 'border-rose-400 focus:border-rose-600'
+                      : 'border-slate-300 focus:border-indigo-600'
+                  }`}
                 />
+                {typedAgencyCandidate && (
+                  <p
+                    className={`mt-1 text-[11px] font-semibold flex items-center gap-1 ${
+                      isDuplicateAgencyName ? 'text-rose-700' : 'text-emerald-700'
+                    }`}
+                  >
+                    {isDuplicateAgencyName ? (
+                      <>
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          Ce nom d’agence (« {typedAgencyCandidate} ») existe déjà. Veuillez choisir un autre nom unique.
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>Nom d’agence disponible : {typedAgencyCandidate}</span>
+                      </>
+                    )}
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -768,17 +828,21 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
                   </label>
                   <input
                     type="text"
-                    value={`${newAgencyAddress}, ${newAgencyCity}`}
-                    onChange={(e) => {
-                      const parts = e.target.value.split(',');
-                      setNewAgencyAddress(parts[0]?.trim() || 'Cocody');
-                      setNewAgencyCity(parts[1]?.trim() || 'Abidjan');
-                    }}
+                    value={newAgencyLocation}
+                    onChange={(e) => setNewAgencyLocation(e.target.value)}
+                    placeholder="Ex: Cocody Riviera, Abidjan"
                     className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-md text-slate-900"
                   />
                 </div>
               </div>
             </div>
+
+            {errorMsg && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-md text-xs font-semibold text-rose-800 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
 
             <div className="flex items-center justify-end gap-2 pt-2">
               <button

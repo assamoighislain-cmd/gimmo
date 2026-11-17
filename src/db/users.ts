@@ -19,83 +19,17 @@ function mapRowToAppUser(row: typeof users.$inferSelect): AppUser {
 }
 
 export async function ensureInitialUsers(): Promise<void> {
-  try {
-    const existing = await db.select().from(users);
-    if (existing.length > 0) {
-      // S'assurer que les rôles historiques ('agency_admin') sont normalisés vers 'administrateur'
-      for (const u of existing) {
-        if (
-          u.role !== 'administrateur' &&
-          u.role !== 'gerant' &&
-          u.role !== 'commercial'
-        ) {
-          await db
-            .update(users)
-            .set({ role: normalizeUserRole(u.role) })
-            .where(eq(users.id, u.id));
-        }
-      }
-      return;
-    }
-
-    await db.insert(users).values([
-      {
-        uid: 'gimmo-admin-principal',
-        email: 'assamoighislain@gmail.com',
-        name: 'Assamoi Ghislain — Direction Générale',
-        role: 'administrateur',
-      },
-      {
-        uid: 'gimmo-gerant-locatif',
-        email: 'clarisse.kouame@gimmo.ci',
-        name: 'Clarisse Kouamé — Gérante Locative & Comptable',
-        role: 'gerant',
-      },
-      {
-        uid: 'gimmo-commercial-terrain',
-        email: 'franck.kone@gimmo.ci',
-        name: 'Franck Koné — Responsable Commercial & GPS',
-        role: 'commercial',
-      },
-    ]);
-  } catch (error) {
-    console.error('Database query failed in ensureInitialUsers:', error);
-  }
+  // Base Cloud SQL laissée vierge sans données de démonstration automatiques
+  return;
 }
 
 export async function getAllUsers(): Promise<AppUser[]> {
   try {
-    await ensureInitialUsers();
     const rows = await db.select().from(users).orderBy(asc(users.id));
     return rows.map(mapRowToAppUser);
   } catch (error) {
     console.error('Database query failed in getAllUsers:', error);
-    return [
-      {
-        id: 1,
-        uid: 'gimmo-admin-principal',
-        email: 'assamoighislain@gmail.com',
-        name: 'Assamoi Ghislain — Direction Générale',
-        role: 'administrateur',
-        createdAt: new Date().toISOString(),
-      },
-      {
-        id: 2,
-        uid: 'gimmo-gerant-locatif',
-        email: 'clarisse.kouame@gimmo.ci',
-        name: 'Clarisse Kouamé — Gérante Locative & Comptable',
-        role: 'gerant',
-      createdAt: new Date().toISOString(),
-      },
-      {
-        id: 3,
-        uid: 'gimmo-commercial-terrain',
-        email: 'franck.kone@gimmo.ci',
-        name: 'Franck Koné — Responsable Commercial & GPS',
-        role: 'commercial',
-        createdAt: new Date().toISOString(),
-      },
-    ];
+    return [];
   }
 }
 

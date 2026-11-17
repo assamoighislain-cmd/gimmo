@@ -502,8 +502,6 @@ export async function ensureInitialData(userId: string = 'global_demo') {
 
 export async function getAllDashboardData() {
   try {
-    await ensureInitialData();
-
     const [allLandlords, allProperties, allTenants, allLeases, allPayments] =
       await Promise.all([
         db.select().from(landlords).orderBy(desc(landlords.id)),
