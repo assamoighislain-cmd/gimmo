@@ -11,6 +11,7 @@ import {
   createInitialTemplatesStore,
 } from './document-templates.ts';
 import { normalizeUserRole } from './rbac.ts';
+import { validateWhatsAppPhone } from './agency-notifications.ts';
 
 const OFFLINE_CACHE_KEY = 'gimmo_offline_cache_v1';
 const OFFLINE_QUEUE_KEY = 'gimmo_offline_queue_v1';
@@ -625,6 +626,9 @@ export function applyOptimisticMutationToSnapshot(
         };
       });
     } else {
+      const rawPhone = String(body.whatsappPhone || body.phone || '').trim();
+      const waCheck = validateWhatsAppPhone(rawPhone);
+      const normalizedPhone = waCheck.isValid ? waCheck.formattedDisplay : rawPhone;
       const newTenant = {
         id: targetId || `tenant_off_${tempId}`,
         companyName: body.companyName || 'Nouvelle Agence SaaS',
@@ -635,8 +639,8 @@ export function applyOptimisticMutationToSnapshot(
         licenseNumber: body.licenseNumber || 'Agrément MCLU N° 2026/AG',
         managerName: body.managerName || 'Gérant Mandataire',
         ownerEmail: body.ownerEmail || 'direction@agence.ci',
-        phone: body.whatsappPhone || body.phone || '+225 07 00 00 00 00',
-        whatsappPhone: body.whatsappPhone || body.phone || '+225 07 00 00 00 00',
+        phone: normalizedPhone,
+        whatsappPhone: normalizedPhone,
         address: body.address || 'Abidjan Cocody',
         city: body.city || 'Abidjan',
         plan: body.plan || 'pro',

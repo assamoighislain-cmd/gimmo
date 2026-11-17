@@ -28,6 +28,7 @@ import {
   resolveSaaSUsers,
   interpolateTemplateVariables,
 } from '../lib/document-templates.ts';
+import { validateWhatsAppPhone } from '../lib/agency-notifications.ts';
 
 const TEMPLATES_FILE_PATH = path.resolve(
   process.cwd(),
@@ -202,6 +203,28 @@ export function upsertSaaSTenantEntry(
       if (idx !== existingIdx) {
         return makeCurrent ? { ...item, isCurrentTenant: false } : item;
       }
+
+      const currentStoredPhone = (item.whatsappPhone || item.phone || '').trim();
+      const incomingRawPhone = (
+        payload.whatsappPhone ??
+        payload.phone ??
+        currentStoredPhone
+      ).trim();
+      const phoneWasChanged =
+        (payload.whatsappPhone !== undefined || payload.phone !== undefined) &&
+        incomingRawPhone !== currentStoredPhone;
+
+      const waCheck = validateWhatsAppPhone(incomingRawPhone);
+      if (phoneWasChanged && !waCheck.isValid) {
+        throw new Error(
+          waCheck.error ||
+            'Le numéro WhatsApp saisi pour l’agence immobilière n’est pas conforme.'
+        );
+      }
+      const normalizedPhone = waCheck.isValid
+        ? waCheck.formattedDisplay
+        : incomingRawPhone;
+
       return {
         ...item,
         companyName: payload.companyName.trim(),
@@ -212,13 +235,8 @@ export function upsertSaaSTenantEntry(
         licenseNumber: (payload.licenseNumber ?? item.licenseNumber).trim(),
         managerName: (payload.managerName ?? item.managerName).trim(),
         ownerEmail: (payload.ownerEmail ?? item.ownerEmail).trim(),
-        phone: (payload.phone ?? payload.whatsappPhone ?? item.phone).trim(),
-        whatsappPhone: (
-          payload.whatsappPhone ??
-          payload.phone ??
-          item.whatsappPhone ??
-          item.phone
-        ).trim(),
+        phone: normalizedPhone,
+        whatsappPhone: normalizedPhone,
         address: (payload.address ?? item.address).trim(),
         city: (payload.city ?? item.city).trim(),
         plan: payload.plan || item.plan,
@@ -231,11 +249,16 @@ export function upsertSaaSTenantEntry(
       };
     });
   } else {
-    const resolvedPhone = (
-      payload.whatsappPhone ||
-      payload.phone ||
-      '+225 07 00 00 00 00'
-    ).trim();
+    const rawCandidatePhone = (payload.whatsappPhone || payload.phone || '').trim();
+    const waCheck = validateWhatsAppPhone(rawCandidatePhone);
+    if (!waCheck.isValid) {
+      throw new Error(
+        waCheck.error ||
+          'Le numéro WhatsApp saisi pour l’agence immobilière n’est pas conforme.'
+      );
+    }
+    const resolvedPhone = waCheck.formattedDisplay;
+
     const newItem: SaaSTenantAgency = {
       id: targetId || `tenant_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       companyName: payload.companyName.trim(),

@@ -16,6 +16,7 @@ import {
   Sparkles,
   Volume2,
   MessageCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   type SaaSTenantAgency,
@@ -30,6 +31,8 @@ import {
 } from '../lib/document-templates';
 import { executeMutation } from '../lib/offline-manager';
 import {
+  WHATSAPP_COUNTRY_RULES,
+  validateWhatsAppPhone,
   playAgencyCreatedSound,
   buildAgencyCreatedWhatsAppDetails,
   buildAgencyApprovedWhatsAppDetails,
@@ -103,12 +106,14 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
   const users = resolveSaaSUsers(templatesStore);
   const activeCompany = resolveManagementCompany(templatesStore);
 
-  const currentRole = activeAccount?.role || 'agency_admin';
+  const currentRole = activeAccount?.role || 'agent';
   const rolePermissions = ROLE_PERMISSIONS[currentRole];
-  const isSuperAdmin =
-    rolePermissions.canApproveAgency &&
-    (currentRole === 'super_admin' ||
-      activeAccount?.email?.toLowerCase() === 'assamoighislain@gmail.com');
+  const isSuperAdmin = Boolean(
+    activeAccount &&
+      rolePermissions.canViewSaaSConsole &&
+      (currentRole === 'super_admin' ||
+        activeAccount.email.trim().toLowerCase() === 'assamoighislain@gmail.com')
+  );
 
   const [activeSubTab, setActiveSubTab] = useState<'tenants' | 'users' | 'plans'>('tenants');
   const [feedback, setFeedback] = useState<{
@@ -120,6 +125,7 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
   const [editingTenantId, setEditingTenantId] = useState<string | null>(null);
   const [showTenantForm, setShowTenantForm] = useState(false);
   const [confirmDeleteTenantId, setConfirmDeleteTenantId] = useState<string | null>(null);
+  const [tenantPhoneCountry, setTenantPhoneCountry] = useState<string>('225');
   const [tenantForm, setTenantForm] = useState({
     companyName: '',
     tradeName: '',
@@ -153,6 +159,11 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
     status: 'active' as SaaSUserAccount['status'],
   });
 
+  // Seul l'administrateur (Super Admin) a le droit de voir "Système SaaS Multi-Agences & Console Super Administrateur"
+  if (!isSuperAdmin) {
+    return null;
+  }
+
   // Calculs KPIs SaaS
   const mrrFcfa = tenants
     .filter((t) => t.status === 'active')
@@ -163,6 +174,7 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
 
   const openNewTenantForm = () => {
     setEditingTenantId(null);
+    setTenantPhoneCountry('225');
     setTenantForm({
       companyName: '',
       tradeName: '',
@@ -172,7 +184,7 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
       licenseNumber: 'Agrément MCLU N° 0250/MCLU/AG',
       managerName: '',
       ownerEmail: '',
-      phone: '+225 07 00 00 00 00',
+      phone: '',
       address: 'Cocody Riviera',
       city: 'Abidjan',
       plan: 'pro',
@@ -187,7 +199,10 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
   };
 
   const openEditTenantForm = (tenant: SaaSTenantAgency) => {
+    const rawPhone = tenant.whatsappPhone || tenant.phone || '';
+    const check = validateWhatsAppPhone(rawPhone, '225');
     setEditingTenantId(tenant.id);
+    setTenantPhoneCountry(check.countryCode || '225');
     setTenantForm({
       companyName: tenant.companyName,
       tradeName: tenant.tradeName,
@@ -197,7 +212,7 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
       licenseNumber: tenant.licenseNumber,
       managerName: tenant.managerName,
       ownerEmail: tenant.ownerEmail,
-      phone: tenant.phone,
+      phone: rawPhone,
       address: tenant.address,
       city: tenant.city,
       plan: tenant.plan,
@@ -254,10 +269,22 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
       return;
     }
 
+    const waCheck = validateWhatsAppPhone(tenantForm.phone, tenantPhoneCountry);
+    if (!waCheck.isValid) {
+      setFeedback({
+        type: 'error',
+        message:
+          waCheck.error ||
+          'Le numéro WhatsApp de l’agence immobilière n’est pas conforme.',
+      });
+      return;
+    }
+
     const res = await executeMutation('/api/saas/tenants', 'POST', {
       id: editingTenantId || undefined,
       ...tenantForm,
-      whatsappPhone: tenantForm.phone,
+      phone: waCheck.formattedDisplay,
+      whatsappPhone: waCheck.formattedDisplay,
       companyName: tenantForm.companyName.trim().toUpperCase(),
     });
 
@@ -634,28 +661,56 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
                       key={pendingTenant.id}
                       className="p-2.5 bg-white border border-emerald-200 rounded-sm flex flex-wrap items-center justify-between gap-2 text-xs"
                     >
-                      <div>
-                        <span className="font-extrabold text-indigo-950">
-                          {pendingTenant.companyName}
-                        </span>{' '}
-                        <span className="text-slate-600">
-                          · Directeur d’Agence : <strong>{pendingTenant.managerName}</strong> · WhatsApp :{' '}
-                          <strong className="text-emerald-800">
-                            {pendingTenant.whatsappPhone || pendingTenant.phone}
-                          </strong>
-                        </span>
+                      <div className="space-y-0.5">
+                        <div>
+                          <span className="font-extrabold text-indigo-950">
+                            {pendingTenant.companyName}
+                          </span>{' '}
+                          <span className="text-slate-600">
+                            · Directeur d’Agence : <strong>{pendingTenant.managerName}</strong> · WhatsApp :{' '}
+                            <strong
+                              className={
+                                createdWa.isCompliant ? 'text-emerald-800' : 'text-rose-700'
+                              }
+                            >
+                              {createdWa.whatsappPhone ||
+                                pendingTenant.whatsappPhone ||
+                                pendingTenant.phone}
+                            </strong>
+                          </span>
+                        </div>
+                        {!createdWa.isCompliant && (
+                          <div className="text-[11px] font-semibold text-rose-700 flex items-center gap-1">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                            <span>
+                              {createdWa.validationError ||
+                                'Numéro WhatsApp non conforme — cliquez sur Corriger N° WhatsApp.'}
+                            </span>
+                          </div>
+                        )}
                       </div>
                       <div className="flex items-center gap-2">
-                        <a
-                          href={createdWa.whatsappUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={() => playAgencyCreatedSound()}
-                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-sm text-[11px] font-bold inline-flex items-center gap-1"
-                        >
-                          <MessageCircle className="w-3.5 h-3.5" />
-                          Message WhatsApp Création
-                        </a>
+                        {createdWa.isCompliant ? (
+                          <a
+                            href={createdWa.whatsappUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => playAgencyCreatedSound()}
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-sm text-[11px] font-bold inline-flex items-center gap-1"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5" />
+                            Message WhatsApp Création
+                          </a>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => openEditTenantForm(pendingTenant)}
+                            className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-sm text-[11px] font-bold inline-flex items-center gap-1"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            Corriger N° WhatsApp
+                          </button>
+                        )}
                         {isSuperAdmin && (
                           <button
                             type="button"
@@ -835,17 +890,51 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
 
                   <div>
                     <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      Téléphone & Adresse
+                      Numéro WhatsApp Conforme (E.164) *
                     </label>
-                    <input
-                      type="text"
-                      value={tenantForm.phone}
-                      onChange={(e) =>
-                        setTenantForm({ ...tenantForm, phone: e.target.value })
-                      }
-                      placeholder="Téléphone"
-                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-sm"
-                    />
+                    <div className="flex gap-1.5">
+                      <select
+                        value={tenantPhoneCountry}
+                        onChange={(e) => setTenantPhoneCountry(e.target.value)}
+                        className="w-36 shrink-0 px-2 py-1.5 text-xs bg-white border border-slate-300 rounded-sm font-semibold"
+                      >
+                        {WHATSAPP_COUNTRY_RULES.map((rule) => (
+                          <option key={rule.code} value={rule.code}>
+                            {rule.label}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="tel"
+                        required
+                        value={tenantForm.phone}
+                        onChange={(e) =>
+                          setTenantForm({ ...tenantForm, phone: e.target.value })
+                        }
+                        placeholder={
+                          WHATSAPP_COUNTRY_RULES.find((r) => r.code === tenantPhoneCountry)
+                            ?.placeholder || '07 08 09 10 11'
+                        }
+                        className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-sm font-mono"
+                      />
+                    </div>
+                    {tenantForm.phone.trim().length > 0 && (() => {
+                      const check = validateWhatsAppPhone(
+                        tenantForm.phone,
+                        tenantPhoneCountry
+                      );
+                      return check.isValid ? (
+                        <div className="mt-1 text-[10px] font-semibold text-emerald-700 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 shrink-0" />
+                          <span>Conforme WhatsApp : {check.formattedDisplay}</span>
+                        </div>
+                      ) : (
+                        <div className="mt-1 text-[10px] font-semibold text-rose-700 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3 shrink-0" />
+                          <span>{check.error}</span>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div>
@@ -992,10 +1081,24 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
                           <div className="text-[11px] text-slate-500">
                             {tenant.ownerEmail}
                           </div>
-                          <div className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1 mt-0.5">
-                            <MessageCircle className="w-3 h-3" />
-                            <span>WhatsApp : {tenant.whatsappPhone || tenant.phone}</span>
-                          </div>
+                          {(() => {
+                            const waDetails = isPending
+                              ? buildAgencyCreatedWhatsAppDetails(tenant)
+                              : buildAgencyApprovedWhatsAppDetails(tenant);
+                            return waDetails.isCompliant ? (
+                              <div className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1 mt-0.5">
+                                <MessageCircle className="w-3 h-3 shrink-0" />
+                                <span>WhatsApp : {waDetails.whatsappPhone}</span>
+                              </div>
+                            ) : (
+                              <div className="text-[11px] font-semibold text-rose-700 flex items-center gap-1 mt-0.5">
+                                <AlertTriangle className="w-3 h-3 shrink-0" />
+                                <span>
+                                  WhatsApp non conforme ({tenant.whatsappPhone || tenant.phone || 'vide'})
+                                </span>
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="py-3 px-3">
                           {isPending ? (
@@ -1035,21 +1138,37 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
                         <td className="py-3 px-3 text-right">
                           {isSuperAdmin ? (
                             <div className="inline-flex items-center gap-1.5 flex-wrap justify-end">
-                              <a
-                                href={
-                                  isPending
-                                    ? buildAgencyCreatedWhatsAppDetails(tenant).whatsappUrl
-                                    : buildAgencyApprovedWhatsAppDetails(tenant).whatsappUrl
-                                }
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={() => playAgencyCreatedSound()}
-                                className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-sm text-[11px] font-bold flex items-center gap-1"
-                                title="Envoyer la notification WhatsApp à cette agence"
-                              >
-                                <MessageCircle className="w-3 h-3" />
-                                WhatsApp
-                              </a>
+                              {(() => {
+                                const waDetails = isPending
+                                  ? buildAgencyCreatedWhatsAppDetails(tenant)
+                                  : buildAgencyApprovedWhatsAppDetails(tenant);
+                                return waDetails.isCompliant ? (
+                                  <a
+                                    href={waDetails.whatsappUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={() => playAgencyCreatedSound()}
+                                    className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-sm text-[11px] font-bold flex items-center gap-1"
+                                    title="Envoyer la notification WhatsApp à cette agence"
+                                  >
+                                    <MessageCircle className="w-3 h-3" />
+                                    WhatsApp
+                                  </a>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditTenantForm(tenant)}
+                                    className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-sm text-[11px] font-bold flex items-center gap-1"
+                                    title={
+                                      waDetails.validationError ||
+                                      'Corriger le numéro WhatsApp non conforme'
+                                    }
+                                  >
+                                    <AlertTriangle className="w-3 h-3" />
+                                    Corriger WhatsApp
+                                  </button>
+                                );
+                              })()}
                               {isPending && (
                                 <button
                                   type="button"

@@ -29,6 +29,8 @@ import { executeMutation } from '../lib/offline-manager.ts';
 import {
   playAgencyCreatedSound,
   buildAgencyCreatedWhatsAppDetails,
+  validateWhatsAppPhone,
+  WHATSAPP_COUNTRY_RULES,
   type AgencyWhatsAppNotification,
 } from '../lib/agency-notifications.ts';
 
@@ -71,12 +73,20 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
   const [regFullName, setRegFullName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
+  const [whatsappCountryCode, setWhatsappCountryCode] = useState('225');
   const [newAgencyWhatsapp, setNewAgencyWhatsapp] = useState('');
   const [newAgencyName, setNewAgencyName] = useState('');
   const [newAgencyRccm, setNewAgencyRccm] = useState('');
   const [newAgencyTaxId, setNewAgencyTaxId] = useState('');
   const [newAgencyAddress, setNewAgencyAddress] = useState('Cocody Riviera');
   const [newAgencyCity, setNewAgencyCity] = useState('Abidjan');
+
+  const selectedCountryRule =
+    WHATSAPP_COUNTRY_RULES.find((r) => r.code === whatsappCountryCode) ||
+    WHATSAPP_COUNTRY_RULES[0];
+  const liveWhatsappValidation = newAgencyWhatsapp.trim()
+    ? validateWhatsAppPhone(newAgencyWhatsapp, whatsappCountryCode)
+    : null;
 
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -205,9 +215,14 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
       return;
     }
 
-    if (!newAgencyWhatsapp.trim()) {
+    const waValidation = validateWhatsAppPhone(
+      newAgencyWhatsapp,
+      whatsappCountryCode
+    );
+    if (!waValidation.isValid) {
       setErrorMsg(
-        'Veuillez saisir votre numéro WhatsApp pour recevoir la notification de création de l’agence immobilière.'
+        waValidation.error ||
+          'Le numéro WhatsApp saisi n’est pas conforme au format international WhatsApp.'
       );
       return;
     }
@@ -258,7 +273,7 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
 
       const createdTenantId = `tenant-${Date.now()}`;
       const nowIso = new Date().toISOString();
-      const cleanWhatsapp = newAgencyWhatsapp.trim();
+      const cleanWhatsapp = waValidation.formattedDisplay;
 
       const newAgencyPayload: SaaSTenantAgency = {
         id: createdTenantId,
@@ -591,7 +606,7 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
+              <div className="sm:col-span-2">
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   Nom & Prénom du Directeur d’Agence *
                 </label>
@@ -605,19 +620,70 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
                 />
               </div>
 
-              <div>
+              <div className="sm:col-span-2">
                 <label className="block text-xs font-bold text-emerald-800 mb-1 flex items-center gap-1">
                   <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                  Numéro WhatsApp (Notification) *
+                  Numéro WhatsApp Officiel (Format International Conforme) *
                 </label>
-                <input
-                  type="tel"
-                  required
-                  value={newAgencyWhatsapp}
-                  onChange={(e) => setNewAgencyWhatsapp(e.target.value)}
-                  placeholder="Ex: +225 07 08 09 10 11"
-                  className="w-full px-3 py-2 text-xs bg-emerald-50/40 border border-emerald-400 rounded-md focus:outline-none focus:border-emerald-600 font-semibold text-slate-900"
-                />
+                <div className="flex items-stretch gap-2">
+                  <select
+                    value={whatsappCountryCode}
+                    onChange={(e) => setWhatsappCountryCode(e.target.value)}
+                    aria-label="Indicatif pays WhatsApp"
+                    className="w-[150px] sm:w-[190px] shrink-0 px-2.5 py-2 text-xs bg-white border border-emerald-400 rounded-md focus:outline-none focus:border-emerald-600 font-bold text-slate-900"
+                  >
+                    {WHATSAPP_COUNTRY_RULES.map((rule) => (
+                      <option key={rule.code} value={rule.code}>
+                        {rule.iso} · +{rule.code} ({rule.label.split(' (')[0]})
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    required
+                    value={newAgencyWhatsapp}
+                    onChange={(e) => {
+                      const sanitizedInput = e.target.value.replace(
+                        /[^0-9+\s()-]/g,
+                        ''
+                      );
+                      setNewAgencyWhatsapp(sanitizedInput);
+                    }}
+                    placeholder={`Ex: ${selectedCountryRule.placeholder}`}
+                    className={`flex-1 px-3 py-2 text-xs rounded-md focus:outline-none font-mono font-bold text-slate-900 border ${
+                      liveWhatsappValidation
+                        ? liveWhatsappValidation.isValid
+                          ? 'bg-emerald-50/60 border-emerald-500 focus:border-emerald-700'
+                          : 'bg-rose-50/50 border-rose-400 focus:border-rose-600'
+                        : 'bg-emerald-50/40 border-emerald-400 focus:border-emerald-600'
+                    }`}
+                  />
+                </div>
+                {liveWhatsappValidation ? (
+                  liveWhatsappValidation.isValid ? (
+                    <p className="mt-1 text-[11px] font-bold text-emerald-700 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                      <span>
+                        Numéro WhatsApp conforme :{' '}
+                        <strong className="font-mono">
+                          {liveWhatsappValidation.formattedDisplay}
+                        </strong>
+                      </span>
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-[11px] font-semibold text-rose-700">
+                      {liveWhatsappValidation.error}
+                    </p>
+                  )
+                ) : (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Format attendu pour {selectedCountryRule.label} :{' '}
+                    <span className="font-mono font-semibold text-slate-700">
+                      {selectedCountryRule.exampleFormatted}
+                    </span>
+                  </p>
+                )}
               </div>
 
               <div>

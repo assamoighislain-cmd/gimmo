@@ -609,21 +609,23 @@ export default function App() {
     ? ROLE_PERMISSIONS[activeAccount.role] || ROLE_PERMISSIONS.agency_admin
     : ROLE_PERMISSIONS.agency_admin;
 
+  const isSuperAdminAccount = Boolean(
+    activeAccount &&
+      currentRolePermissions.canViewSaaSConsole &&
+      (activeAccount.role === 'super_admin' ||
+        activeAccount.email.trim().toLowerCase() === 'assamoighislain@gmail.com')
+  );
+
   const pendingAgencies = resolveSaaSTenants(templatesStore).filter(
     (t) => t.status === 'pending_approval'
   );
   const pendingAgenciesCount = pendingAgencies.length;
 
   useEffect(() => {
-    if (
-      activeAccount &&
-      (activeAccount.role === 'super_admin' ||
-        activeAccount.email.toLowerCase() === 'assamoighislain@gmail.com') &&
-      pendingAgenciesCount > 0
-    ) {
+    if (isSuperAdminAccount && pendingAgenciesCount > 0) {
       playAgencyCreatedSound();
     }
-  }, [activeAccount, pendingAgenciesCount]);
+  }, [isSuperAdminAccount, pendingAgenciesCount]);
 
   // Si aucun compte utilisateur n'est connecté au lancement, la première page affichée est la Page de Connexion
   if (!activeAccount) {
@@ -829,7 +831,7 @@ export default function App() {
       </div>
 
       {/* Notification Super Admin quand une nouvelle agence immobilière est créée */}
-      {currentRolePermissions.canApproveAgency && pendingAgencies.length > 0 && (
+      {isSuperAdminAccount && pendingAgencies.length > 0 && (
         <div className="bg-emerald-950 text-white border-b border-emerald-800 px-4 sm:px-6 py-2.5">
           <div className="max-w-[1400px] mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-2 flex-wrap">
@@ -1244,10 +1246,14 @@ export default function App() {
                 <div className="border-2 border-indigo-200 bg-white rounded-2xl p-5 sm:p-6 shadow-xs space-y-5">
                   <div>
                     <h2 className="text-lg sm:text-xl lg:text-2xl font-extrabold text-indigo-950">
-                      Paramétrage Général — Société de Gestion (En-tête PDF), Système SaaS Super Admin, Types de Biens & Mois Comptables
+                      {isSuperAdminAccount
+                        ? 'Paramétrage Général — Société de Gestion (En-tête PDF), Système SaaS Super Admin, Types de Biens & Mois Comptables'
+                        : 'Paramétrage Général — Société de Gestion (En-tête PDF), Types de Biens & Mois Comptables'}
                     </h2>
                     <p className="text-xs sm:text-sm font-medium text-slate-700 mt-1">
-                      Identifiez la société qui gère les biens des bailleurs afin que ses coordonnées légales apparaissent à l’en-tête de tous les documents PDF, pilotez le système SaaS multi-agences avec le compte Super Admin (assamoighislain@gmail.com), et configurez vos types de biens et mois comptables.
+                      {isSuperAdminAccount
+                        ? 'Identifiez la société qui gère les biens des bailleurs afin que ses coordonnées légales apparaissent à l’en-tête de tous les documents PDF, pilotez le système SaaS multi-agences avec le compte Super Admin (assamoighislain@gmail.com), et configurez vos types de biens et mois comptables.'
+                        : 'Identifiez votre agence immobilière afin que ses coordonnées légales apparaissent à l’en-tête de tous les documents PDF, et configurez vos types de biens, mois comptables et bailleurs.'}
                     </p>
                   </div>
 
@@ -1347,14 +1353,16 @@ export default function App() {
                   onSuccess={fetchOverviewData}
                 />
 
-                {/* 2. Système SaaS Multi-Agences & Console Super Admin (assamoighislain@gmail.com) */}
-                <SaaSSuperAdminPanel
-                  templatesStore={templatesStore}
-                  activeAccount={activeAccount}
-                  totalPropertiesCount={properties.length}
-                  totalLandlordsCount={landlords.length}
-                  onSuccess={fetchOverviewData}
-                />
+                {/* 2. Système SaaS Multi-Agences & Console Super Administrateur — Visible uniquement par l'Administrateur (Super Admin) */}
+                {isSuperAdminAccount && (
+                  <SaaSSuperAdminPanel
+                    templatesStore={templatesStore}
+                    activeAccount={activeAccount}
+                    totalPropertiesCount={properties.length}
+                    totalLandlordsCount={landlords.length}
+                    onSuccess={fetchOverviewData}
+                  />
+                )}
 
                 {/* 3. Guide d'Utilisateur Officiel avec exportation PDF directe */}
                 <UserGuideModal isModal={false} />
@@ -1581,7 +1589,9 @@ export default function App() {
           <div className="text-slate-600 flex items-center gap-1.5">
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
             <span>
-              Super Admin SaaS : assamoighislain@gmail.com · PostgreSQL + PostGIS · PDFKit
+              {isSuperAdminAccount
+                ? 'Super Admin SaaS : assamoighislain@gmail.com · PostgreSQL + PostGIS · PDFKit'
+                : 'Gestion Immobilière Sécurisée · PostgreSQL + PostGIS · PDFKit'}
             </span>
           </div>
         </div>

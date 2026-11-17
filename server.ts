@@ -472,7 +472,7 @@ async function startServer() {
       res.status(201).json({ templates: updatedStore });
     } catch (error: any) {
       res
-        .status(500)
+        .status(400)
         .json({ error: error.message || 'Erreur sauvegarde agence SaaS' });
     }
   });

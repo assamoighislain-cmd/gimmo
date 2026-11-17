@@ -183,6 +183,7 @@ export interface SaaSUserAccount {
 export interface RolePermissionSpec {
   role: SaaSUserAccount['role'];
   label: string;
+  canViewSaaSConsole: boolean;
   canApproveAgency: boolean;
   canManageSaaSTenants: boolean;
   canEditAgencyProfile: boolean;
@@ -198,6 +199,7 @@ export const ROLE_PERMISSIONS: Record<SaaSUserAccount['role'], RolePermissionSpe
   super_admin: {
     role: 'super_admin',
     label: 'Super Admin SaaS',
+    canViewSaaSConsole: true,
     canApproveAgency: true,
     canManageSaaSTenants: true,
     canEditAgencyProfile: true,
@@ -207,6 +209,7 @@ export const ROLE_PERMISSIONS: Record<SaaSUserAccount['role'], RolePermissionSpe
     canAccessRecovery: true,
     canAccessSettings: true,
     restrictionsSummary: [
+      'Seul rôle autorisé à voir « Système SaaS Multi-Agences & Console Super Administrateur ».',
       'Seul rôle autorisé à approuver, suspendre ou supprimer une Agence Immobilière.',
       'Restriction : Compte de gouvernance SaaS protégé (ne peut être ni supprimé ni rétrogradé par une agence).',
     ],
@@ -214,6 +217,7 @@ export const ROLE_PERMISSIONS: Record<SaaSUserAccount['role'], RolePermissionSpe
   agency_admin: {
     role: 'agency_admin',
     label: 'Directeur d’Agence',
+    canViewSaaSConsole: false,
     canApproveAgency: false,
     canManageSaaSTenants: false,
     canEditAgencyProfile: true,
@@ -224,13 +228,14 @@ export const ROLE_PERMISSIONS: Record<SaaSUserAccount['role'], RolePermissionSpe
     canAccessSettings: true,
     restrictionsSummary: [
       'Rôle attribué par défaut lors de la création d’une agence immobilière.',
-      'Restriction 1 : N’a pas le droit d’approuver une agence immobilière (réservé au Super Admin).',
+      'Restriction 1 : N’a pas le droit de voir « Système SaaS Multi-Agences & Console Super Administrateur » ni d’approuver une agence (réservé à l’Administrateur).',
       'Restriction 2 : N’a pas le droit de modifier ou supprimer les autres agences du réseau SaaS.',
     ],
   },
   manager: {
     role: 'manager',
     label: 'Gestionnaire Locatif',
+    canViewSaaSConsole: false,
     canApproveAgency: false,
     canManageSaaSTenants: false,
     canEditAgencyProfile: false,
@@ -240,7 +245,7 @@ export const ROLE_PERMISSIONS: Record<SaaSUserAccount['role'], RolePermissionSpe
     canAccessRecovery: true,
     canAccessSettings: true,
     restrictionsSummary: [
-      'Restriction 1 : N’a pas le droit d’approuver une agence immobilière.',
+      'Restriction 1 : N’a pas le droit de voir « Système SaaS Multi-Agences & Console Super Administrateur » ni d’approuver une agence.',
       'Restriction 2 : N’a pas le droit de supprimer un bailleur mandant.',
       'Restriction 3 : N’a pas le droit de modifier l’identification légale de l’agence ni de gérer les comptes utilisateurs.',
     ],
@@ -248,6 +253,7 @@ export const ROLE_PERMISSIONS: Record<SaaSUserAccount['role'], RolePermissionSpe
   agent: {
     role: 'agent',
     label: 'Agent Immobilier',
+    canViewSaaSConsole: false,
     canApproveAgency: false,
     canManageSaaSTenants: false,
     canEditAgencyProfile: false,
@@ -257,7 +263,7 @@ export const ROLE_PERMISSIONS: Record<SaaSUserAccount['role'], RolePermissionSpe
     canAccessRecovery: false,
     canAccessSettings: false,
     restrictionsSummary: [
-      'Restriction 1 : N’a pas accès aux rubriques « Recouvrement » et « Paramétrage ».',
+      'Restriction 1 : N’a pas accès aux rubriques « Recouvrement », « Paramétrage » ni à la console Super Administrateur.',
       'Restriction 2 : N’a pas le droit de supprimer des biens, des baux, des quittances ou des bailleurs.',
       'Restriction 3 : N’a pas le droit d’approuver une agence immobilière.',
     ],
