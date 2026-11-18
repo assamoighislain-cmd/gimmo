@@ -67,10 +67,13 @@ async function startServer() {
   await initTemplatesStoreFromDb();
 
   const getDashboardDataWithTemplates = async () => {
-    const dbData = await getAllDashboardData();
+    const [dbData, freshTemplates] = await Promise.all([
+      getAllDashboardData(),
+      initTemplatesStoreFromDb(),
+    ]);
     return {
       ...dbData,
-      templates: getDocumentTemplatesStore(),
+      templates: freshTemplates,
     };
   };
 
@@ -241,9 +244,9 @@ async function startServer() {
             const id = Number(url.split('/').pop());
             await updatePaymentRecord(id, body);
           } else if (url === '/api/templates' && method === 'PUT') {
-            saveDocumentTemplateEntry(body);
+            await saveDocumentTemplateEntry(body);
           } else if (url === '/api/accounting-months' && method === 'POST') {
-            upsertAccountingMonthEntry(body);
+            await upsertAccountingMonthEntry(body);
             if (body?.autoGenerateRentCalls) {
               await generateRentCallsForMonthRecord({
                 userId: 'global_demo',
@@ -267,31 +270,31 @@ async function startServer() {
             await deletePaymentRecord(id);
           } else if (url?.startsWith('/api/accounting-months/') && method === 'DELETE') {
             const periodMonth = decodeURIComponent(url.split('/').pop() || '');
-            deleteAccountingMonthEntry(periodMonth);
+            await deleteAccountingMonthEntry(periodMonth);
           } else if (url === '/api/property-types' && method === 'POST') {
-            upsertPropertyTypeEntry(body);
+            await upsertPropertyTypeEntry(body);
             if (body?.previousName && body.previousName !== body.name) {
               await renamePropertyTypeInRecords(body.previousName, body.name);
             }
           } else if (url?.startsWith('/api/property-types/') && method === 'DELETE') {
             const id = decodeURIComponent(url.split('/').pop() || '');
-            deletePropertyTypeEntry(id);
+            await deletePropertyTypeEntry(id);
           } else if (url === '/api/management-company' && method === 'PUT') {
-            saveManagementCompanyEntry(body || {});
+            await saveManagementCompanyEntry(body || {});
           } else if (url === '/api/saas/tenants' && method === 'POST') {
             if (body?.companyName) {
-              upsertSaaSTenantEntry(body);
+              await upsertSaaSTenantEntry(body);
             }
           } else if (url?.startsWith('/api/saas/tenants/') && method === 'DELETE') {
             const id = decodeURIComponent(url.split('/').pop() || '');
-            deleteSaaSTenantEntry(id);
+            await deleteSaaSTenantEntry(id);
           } else if (url === '/api/saas/users' && method === 'POST') {
             if (body?.email && body?.fullName) {
-              upsertSaaSUserEntry(body);
+              await upsertSaaSUserEntry(body);
             }
           } else if (url?.startsWith('/api/saas/users/') && method === 'DELETE') {
             const id = decodeURIComponent(url.split('/').pop() || '');
-            deleteSaaSUserEntry(id);
+            await deleteSaaSUserEntry(id);
           }
         } catch (mutationErr) {
           console.warn('Skipping failed queued mutation during batch sync:', mutationErr);
@@ -318,7 +321,7 @@ async function startServer() {
       if (!scopeKey || (kind !== 'lease' && kind !== 'receipt') || !config) {
         return res.status(400).json({ error: 'Paramètres de modèle invalides' });
       }
-      const updatedStore = saveDocumentTemplateEntry({ scopeKey, kind, config });
+      const updatedStore = await saveDocumentTemplateEntry({ scopeKey, kind, config });
       await broadcastRealtimeState(
         `Modèle de ${kind === 'lease' ? 'Contrat de Bail' : 'Quittance'} mis à jour (${scopeKey})`
       );
@@ -349,7 +352,7 @@ async function startServer() {
           .json({ error: 'Le code du mois (YYYY-MM) et le libellé sont requis' });
       }
 
-      const updatedStore = upsertAccountingMonthEntry({
+      const updatedStore = await upsertAccountingMonthEntry({
         periodMonth,
         periodLabel,
         defaultDueDay: Number(defaultDueDay || 5),
@@ -404,7 +407,7 @@ async function startServer() {
           .json({ error: 'Le nom du type de bien est requis' });
       }
 
-      const updatedStore = upsertPropertyTypeEntry({
+      const updatedStore = await upsertPropertyTypeEntry({
         id,
         name: String(name).trim(),
         code,
@@ -431,7 +434,7 @@ async function startServer() {
   app.delete('/api/property-types/:id', async (req, res) => {
     try {
       const id = decodeURIComponent(req.params.id);
-      const updatedStore = deletePropertyTypeEntry(id);
+      const updatedStore = await deletePropertyTypeEntry(id);
       await broadcastRealtimeState(`Type de bien supprimé : ${id}`);
       res.json({ success: true, templates: updatedStore });
     } catch (error: any) {
@@ -452,7 +455,7 @@ async function startServer() {
           .status(400)
           .json({ error: 'La raison sociale de la société de gestion est requise' });
       }
-      const updatedStore = saveManagementCompanyEntry(payload);
+      const updatedStore = await saveManagementCompanyEntry(payload);
       await broadcastRealtimeState(
         `Société de gestion mise à jour : ${String(payload.companyName).trim()}`
       );
@@ -475,7 +478,7 @@ async function startServer() {
           .status(400)
           .json({ error: 'Le nom de la société/agence SaaS est requis' });
       }
-      const updatedStore = upsertSaaSTenantEntry(payload);
+      const updatedStore = await upsertSaaSTenantEntry(payload);
       await broadcastRealtimeState(
         `Agence SaaS enregistrée : ${String(payload.companyName).trim()}`
       );
@@ -490,7 +493,7 @@ async function startServer() {
   app.delete('/api/saas/tenants/:id', async (req, res) => {
     try {
       const id = decodeURIComponent(req.params.id);
-      const updatedStore = deleteSaaSTenantEntry(id);
+      const updatedStore = await deleteSaaSTenantEntry(id);
       await broadcastRealtimeState(`Agence SaaS supprimée : ${id}`);
       res.json({ success: true, templates: updatedStore });
     } catch (error: any) {
@@ -508,7 +511,7 @@ async function startServer() {
           .status(400)
           .json({ error: 'Le nom complet et l’email de l’utilisateur SaaS sont requis' });
       }
-      const updatedStore = upsertSaaSUserEntry(payload);
+      const updatedStore = await upsertSaaSUserEntry(payload);
       await broadcastRealtimeState(
         `Compte utilisateur SaaS mis à jour : ${String(payload.email).trim()}`
       );
@@ -534,7 +537,7 @@ async function startServer() {
           | string
           | undefined,
       };
-      const updatedStore = deleteSaaSUserEntry(id, actor);
+      const updatedStore = await deleteSaaSUserEntry(id, actor);
       await broadcastRealtimeState(`Compte utilisateur SaaS supprimé : ${id}`);
       res.json({ success: true, templates: updatedStore });
     } catch (error: any) {
@@ -1054,7 +1057,7 @@ async function startServer() {
   app.delete('/api/accounting-months/:periodMonth', async (req, res) => {
     try {
       const periodMonth = decodeURIComponent(req.params.periodMonth);
-      const updatedStore = deleteAccountingMonthEntry(periodMonth);
+      const updatedStore = await deleteAccountingMonthEntry(periodMonth);
       await broadcastRealtimeState(`Mois comptable supprimé : ${periodMonth}`);
       res.json({ success: true, templates: updatedStore });
     } catch (error: any) {

@@ -251,6 +251,25 @@ export default function App() {
 
     try {
       setDataError(null);
+
+      // Si des mutations locales (ex: création d'agence hors-ligne) sont en attente, on les pousse d'abord vers Cloud SQL
+      const pendingBeforeFetch = getOfflineQueue();
+      if (pendingBeforeFetch.length > 0) {
+        try {
+          const syncRes = await fetch('/api/gimmo/sync-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mutations: pendingBeforeFetch }),
+          });
+          if (syncRes.ok) {
+            clearOfflineQueue();
+            setPendingOfflineCount(0);
+          }
+        } catch {
+          // On conserve la file hors-ligne si l'API n'est pas joignable
+        }
+      }
+
       const res = await fetch('/api/gimmo/overview', { cache: 'no-store' });
       const parsed = await parseJsonResponseSafely<any>(res);
       if (!res.ok || !parsed.isJson || !parsed.data) {
@@ -260,21 +279,56 @@ export default function App() {
       const existingSnap = loadOfflineSnapshot();
       const hasPendingQueue = getOfflineQueue().length > 0;
       const incomingLandlords: Landlord[] = data.landlords || [];
-      const mergedLandlords = hasPendingQueue && existingSnap?.landlords
-        ? incomingLandlords.map((rl) => {
-            const localMatch = existingSnap.landlords.find((ll) => ll.id === rl.id);
-            if (!localMatch) return rl;
-            return {
-              ...rl,
-              portalUsername: localMatch.portalUsername || rl.portalUsername,
-              portalPassword: localMatch.portalPassword || rl.portalPassword,
-              portalEnabled:
-                localMatch.portalEnabled !== undefined
-                  ? localMatch.portalEnabled
-                  : rl.portalEnabled,
-            };
-          })
-        : incomingLandlords;
+      const mergedLandlords =
+        hasPendingQueue && existingSnap?.landlords
+          ? incomingLandlords.map((rl) => {
+              const localMatch = existingSnap.landlords.find(
+                (ll) => ll.id === rl.id
+              );
+              if (!localMatch) return rl;
+              return {
+                ...rl,
+                portalUsername: localMatch.portalUsername || rl.portalUsername,
+                portalPassword: localMatch.portalPassword || rl.portalPassword,
+                portalEnabled:
+                  localMatch.portalEnabled !== undefined
+                    ? localMatch.portalEnabled
+                    : rl.portalEnabled,
+              };
+            })
+          : incomingLandlords;
+
+      let mergedTemplates: DocumentTemplatesStore | undefined = data.templates;
+      if (hasPendingQueue && existingSnap?.templates && data.templates) {
+        const remoteTenants = resolveSaaSTenants(data.templates);
+        const localTenants = resolveSaaSTenants(existingSnap.templates);
+        const missingLocalTenants = localTenants.filter(
+          (lt) =>
+            !remoteTenants.some(
+              (rt) =>
+                rt.id === lt.id ||
+                rt.companyName.trim().toLowerCase() ===
+                  lt.companyName.trim().toLowerCase()
+            )
+        );
+
+        const remoteUsers = resolveSaaSUsers(data.templates);
+        const localUsers = resolveSaaSUsers(existingSnap.templates);
+        const missingLocalUsers = localUsers.filter(
+          (lu) =>
+            !remoteUsers.some(
+              (ru) =>
+                ru.id === lu.id ||
+                ru.email.trim().toLowerCase() === lu.email.trim().toLowerCase()
+            )
+        );
+
+        mergedTemplates = {
+          ...data.templates,
+          saasTenants: [...remoteTenants, ...missingLocalTenants],
+          saasUsers: [...remoteUsers, ...missingLocalUsers],
+        };
+      }
 
       const saved = saveOfflineSnapshot({
         landlords: mergedLandlords,
@@ -282,7 +336,7 @@ export default function App() {
         tenants: data.tenants || [],
         leases: data.leases || [],
         payments: data.payments || [],
-        templates: data.templates,
+        templates: mergedTemplates,
       });
       applySnapshotState(saved);
     } catch (err: any) {
@@ -563,7 +617,12 @@ export default function App() {
         await performMutationWithOfflineSupport(
           '/api/saas/tenants',
           'POST',
-          { ...linkedAgency, isCurrentTenant: true },
+          {
+            id: linkedAgency.id,
+            companyName: linkedAgency.companyName,
+            isCurrentTenant: true,
+            activateOnly: true,
+          },
           `Activation de l'agence ${linkedAgency.companyName}`
         );
       }
@@ -786,6 +845,22 @@ export default function App() {
     (t) => t.status === 'pending_approval'
   );
   const pendingAgenciesCount = pendingAgencies.length;
+
+  const handleQuickApproveAgency = async (agency: SaaSTenantAgency) => {
+    if (!isSuperAdminAccount || !activeAccount) return;
+    await performMutationWithOfflineSupport(
+      '/api/saas/tenants',
+      'POST',
+      {
+        ...agency,
+        status: 'active',
+        actorRole: activeAccount.role,
+        actorEmail: activeAccount.email,
+      },
+      `Approbation agence ${agency.companyName}`
+    );
+    playAgencyCreatedSound();
+  };
 
   useEffect(() => {
     if (isSuperAdminAccount && pendingAgenciesCount > 0) {
@@ -1028,12 +1103,15 @@ export default function App() {
             <div className="flex items-center gap-2 flex-wrap">
               <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-500 text-slate-950 font-black rounded-sm">
                 <Volume2 className="w-3.5 h-3.5" />
-                NOUVELLE AGENCE CRÉÉE ({pendingAgencies.length})
+                AGENCE(S) À APPROUVER ({pendingAgencies.length})
               </span>
               <span>
-                Dernière agence :{' '}
-                <strong>{pendingAgencies[pendingAgencies.length - 1].companyName}</strong>{' '}
-                (Directeur : {pendingAgencies[pendingAgencies.length - 1].managerName} · WhatsApp :{' '}
+                En attente :{' '}
+                <strong>
+                  {pendingAgencies.map((a) => a.companyName).join(' · ')}
+                </strong>{' '}
+                (Dernière : Directeur{' '}
+                {pendingAgencies[pendingAgencies.length - 1].managerName} · WhatsApp :{' '}
                 <strong className="text-emerald-300">
                   {pendingAgencies[pendingAgencies.length - 1].whatsappPhone ||
                     pendingAgencies[pendingAgencies.length - 1].phone}
@@ -1041,7 +1119,7 @@ export default function App() {
                 )
               </span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => playAgencyCreatedSound()}
@@ -1066,11 +1144,30 @@ export default function App() {
               </a>
               <button
                 type="button"
-                onClick={() => setActiveSection('settings')}
+                onClick={() =>
+                  handleQuickApproveAgency(
+                    pendingAgencies[pendingAgencies.length - 1]
+                  )
+                }
+                className="px-2.5 py-1 bg-amber-400 hover:bg-amber-300 text-indigo-950 rounded-md font-extrabold inline-flex items-center gap-1"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 text-indigo-950" />
+                Approuver {pendingAgencies[pendingAgencies.length - 1].companyName}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveSection('settings');
+                  setTimeout(() => {
+                    document
+                      .getElementById('saas-super-admin-console')
+                      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }, 100);
+                }}
                 className="px-2.5 py-1 bg-white hover:bg-slate-100 text-indigo-950 rounded-md font-extrabold inline-flex items-center gap-1"
               >
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                Voir & Approuver
+                <Crown className="w-3.5 h-3.5 text-indigo-900" />
+                Console d’Approbation
               </button>
             </div>
           </div>
@@ -1558,21 +1655,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 1. Identification de la Société de Gestion (En-tête officiel de tous les documents PDF) */}
-                <AgencyProfilePanel
-                  templatesStore={templatesStore}
-                  canEdit={currentRolePermissions.canEditAgencyProfile}
-                  onSuccess={fetchOverviewData}
-                />
-
-                {/* 2. Gestion des Comptes Utilisateurs & Attribution des Rôles (Réservée à l'Administrateur et au Directeur d'Agence) */}
-                <AgencyUsersPanel
-                  templatesStore={templatesStore}
-                  activeAccount={activeAccount}
-                  onSuccess={fetchOverviewData}
-                />
-
-                {/* 3. Système SaaS Multi-Agences & Console Super Administrateur — Visible uniquement par l'Administrateur (Super Admin) */}
+                {/* 1. Système SaaS Multi-Agences & Console Super Administrateur — Placé en tête pour le Super Admin afin d'approuver immédiatement les nouvelles agences */}
                 {isSuperAdminAccount && (
                   <SaaSSuperAdminPanel
                     templatesStore={templatesStore}
@@ -1582,6 +1665,20 @@ export default function App() {
                     onSuccess={fetchOverviewData}
                   />
                 )}
+
+                {/* 2. Identification de la Société de Gestion (En-tête officiel de tous les documents PDF) */}
+                <AgencyProfilePanel
+                  templatesStore={templatesStore}
+                  canEdit={currentRolePermissions.canEditAgencyProfile}
+                  onSuccess={fetchOverviewData}
+                />
+
+                {/* 3. Gestion des Comptes Utilisateurs & Attribution des Rôles (Réservée à l'Administrateur et au Directeur d'Agence) */}
+                <AgencyUsersPanel
+                  templatesStore={templatesStore}
+                  activeAccount={activeAccount}
+                  onSuccess={fetchOverviewData}
+                />
 
                 {/* 4. Guide d'Utilisateur Officiel avec exportation PDF directe */}
                 <UserGuideModal isModal={false} />

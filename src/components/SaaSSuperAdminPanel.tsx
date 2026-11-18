@@ -17,6 +17,7 @@ import {
   Volume2,
   MessageCircle,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import {
   type SaaSTenantAgency,
@@ -480,8 +481,15 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
     onSuccess();
   };
 
+  const pendingApprovalCount = tenants.filter(
+    (t) => t.status === 'pending_approval'
+  ).length;
+
   return (
-    <div className="bg-white border border-slate-200 rounded-md shadow-xs overflow-hidden">
+    <div
+      id="saas-super-admin-console"
+      className="bg-white border border-slate-200 rounded-md shadow-xs overflow-hidden scroll-mt-6"
+    >
       {/* Bandeau Super Admin SaaS */}
       <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-950 text-white px-5 py-4 flex flex-wrap items-center justify-between gap-4 border-b border-indigo-900">
         <div className="flex items-center gap-3">
@@ -581,7 +589,12 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
             }`}
           >
             <Building2 className="w-3.5 h-3.5" />
-            1. Sociétés de Gestion Clientes ({tenants.length})
+            <span>1. Sociétés de Gestion Clientes ({tenants.length})</span>
+            {pendingApprovalCount > 0 && (
+              <span className="px-1.5 py-0.5 text-[10px] font-black bg-emerald-500 text-slate-950 rounded-sm">
+                {pendingApprovalCount} à approuver
+              </span>
+            )}
           </button>
 
           <button
@@ -611,7 +624,16 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
           </button>
         </div>
 
-        <div className="pb-2">
+        <div className="pb-2 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={onSuccess}
+            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-sm text-xs font-bold flex items-center gap-1.5 transition-colors"
+            title="Recharger immédiatement la liste des agences et comptes depuis Cloud SQL"
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-indigo-700" />
+            Actualiser
+          </button>
           {activeSubTab === 'tenants' && isSuperAdmin && (
             <button
               type="button"

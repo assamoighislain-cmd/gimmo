@@ -206,8 +206,10 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
 
       if (linkedAgency) {
         await executeMutation('/api/saas/tenants', 'POST', {
-          ...linkedAgency,
+          id: linkedAgency.id,
+          companyName: linkedAgency.companyName,
           isCurrentTenant: true,
+          activateOnly: true,
         });
       }
 
@@ -496,12 +498,18 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
       setNewAgencyName('');
       setRegPassword('');
 
+      const wasSavedOfflineOnly = Boolean(
+        tenantRes.queuedOffline || userRes.queuedOffline
+      );
+
       setTab('login');
       setLoginEmail(normalizedEmail);
       setApprovalPendingNotice(
-        isSuperAdminEmail
+        wasSavedOfflineOnly
+          ? `Attention : L’agence « ${newAgencyPayload.companyName} » a été enregistrée uniquement dans la mémoire locale de ce navigateur car le serveur Cloud SQL (/api/saas/tenants) n’est pas joignable sur cette adresse ou connexion. Pour qu’elle soit visible et approuvée par le Super Admin (assamoighislain@gmail.com) sur tous les appareils, ouvrez l’adresse officielle connectée au serveur Cloud SQL ou cliquez sur le bouton « Sync » dès le retour de la connexion.`
+          : isSuperAdminEmail
           ? `Agence « ${newAgencyPayload.companyName} » créée et activée immédiatement par le Super Admin (WhatsApp : ${cleanWhatsapp}). Une notification sonore a été émise et le message WhatsApp est prêt ci-dessous.`
-          : `Agence « ${newAgencyPayload.companyName} » enregistrée avec succès (Rôle par défaut : Directeur d’Agence · WhatsApp : ${cleanWhatsapp}). Une notification sonore a été émise et le message WhatsApp est prêt ci-dessous. Seul le Super Admin (assamoighislain@gmail.com) a le droit d’approuver votre agence.`
+          : `Agence « ${newAgencyPayload.companyName} » enregistrée dans Cloud SQL avec succès (Rôle par défaut : Directeur d’Agence · WhatsApp : ${cleanWhatsapp}). Elle est immédiatement visible en attente d’approbation dans la console du Super Admin (assamoighislain@gmail.com).`
       );
       bodyScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
       if (typeof window !== 'undefined') {

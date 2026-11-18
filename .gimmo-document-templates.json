@@ -117,17 +117,17 @@
     "legalForm": "SARL au capital de 10 000 000 FCFA",
     "rccm": "CI-ABJ-03-2024-B12-04892",
     "taxId": "CC 2408915 M",
-    "licenseNumber": "Agrément Ministériel MCLU N° 0184/MCLU/DGLCV/AG",
+    "licenseNumber": "Agrément MCLU N° 0184/MCLU/DGLCV/AG",
     "managerName": "M. Ghislain Assamoi",
     "managerTitle": "Directeur Général & Administrateur de Biens",
-    "address": "Boulevard Latrille, Cocody Deux-Plateaux Vallons, Immeuble Prestige 3e étage",
-    "city": "Abidjan — Côte d’Ivoire",
-    "phone": "+225 07 07 00 11 22 / +225 27 22 41 00 00",
+    "address": "Cocody Deux-Plateaux Vallons, Boulevard Latrille",
+    "city": "Abidjan",
+    "phone": "+225 07 07 00 11 22",
     "email": "assamoighislain@gmail.com",
     "website": "www.gimmo-prestige.ci",
     "bankInfo": "SGBCI CI008 01111 012345678901 88 · Orange Money Marchand : #144*821#",
     "headerSlogan": "Société de Gérance Locative, Syndic de Copropriété & Administration de Patrimoine Immobilier",
-    "updatedAt": "2026-11-01T00:00:00.000Z"
+    "updatedAt": "2026-11-18T19:57:41.208Z"
   },
   "saasTenants": [
     {
@@ -163,9 +163,19 @@
       "tenantId": "tenant_gimmo_prestige",
       "tenantName": "GIMMO PRESTIGE IMMOBILIER SARL",
       "status": "active",
-      "lastLoginAt": "2026-11-13T08:30:00.000Z",
+      "lastLoginAt": "2026-11-18T05:57:20.592Z",
       "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "usr-super-admin-ghislain",
+      "fullName": "Ghislain Assamoi",
+      "email": "assamoighislain@gmail.com",
+      "role": "super_admin",
+      "tenantId": "tenant_gimmo_prestige",
+      "tenantName": "GIMMO PRESTIGE IMMOBILIER SARL",
+      "status": "active",
+      "createdAt": "2026-11-18T19:57:41.096Z"
     }
   ],
-  "updatedAt": "2026-11-17T23:40:21.727Z"
+  "updatedAt": "2026-11-18T19:57:41.474Z"
 }

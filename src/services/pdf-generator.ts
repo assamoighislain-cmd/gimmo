@@ -79,7 +79,9 @@ export async function initTemplatesStoreFromDb(): Promise<DocumentTemplatesStore
   return getDocumentTemplatesStore();
 }
 
-function persistTemplatesStore(next: DocumentTemplatesStore): DocumentTemplatesStore {
+async function persistTemplatesStore(
+  next: DocumentTemplatesStore
+): Promise<DocumentTemplatesStore> {
   memoryTemplatesStore = next;
   const serialized = JSON.stringify(next, null, 2);
   try {
@@ -87,23 +89,25 @@ function persistTemplatesStore(next: DocumentTemplatesStore): DocumentTemplatesS
   } catch (err) {
     console.warn('Could not persist .gimmo-document-templates.json:', err);
   }
-  // Persistance durable dans Cloud SQL (table app_settings)
-  db.insert(appSettings)
-    .values({
-      id: SAAS_SETTINGS_ROW_ID,
-      storeJson: serialized,
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: appSettings.id,
-      set: {
+  // Persistance durable synchrone (await) dans Cloud SQL (table app_settings)
+  try {
+    await db
+      .insert(appSettings)
+      .values({
+        id: SAAS_SETTINGS_ROW_ID,
         storeJson: serialized,
         updatedAt: new Date(),
-      },
-    })
-    .catch((err) => {
-      console.warn('Could not persist SaaS store to Cloud SQL app_settings:', err);
-    });
+      })
+      .onConflictDoUpdate({
+        target: appSettings.id,
+        set: {
+          storeJson: serialized,
+          updatedAt: new Date(),
+        },
+      });
+  } catch (err) {
+    console.warn('Could not persist SaaS store to Cloud SQL app_settings:', err);
+  }
   return next;
 }
 
@@ -127,12 +131,12 @@ export function getDocumentTemplatesStore(): DocumentTemplatesStore {
   return memoryTemplatesStore;
 }
 
-export function saveDocumentTemplateEntry(payload: {
+export async function saveDocumentTemplateEntry(payload: {
   scopeKey: string; // 'default' or 'landlord_<id>'
   kind: 'lease' | 'receipt';
   config: LeaseTemplateConfig | ReceiptTemplateConfig;
-}): DocumentTemplatesStore {
-  const current = getDocumentTemplatesStore();
+}): Promise<DocumentTemplatesStore> {
+  const current = await initTemplatesStoreFromDb();
   const next: DocumentTemplatesStore = {
     leases: { ...current.leases },
     receipts: { ...current.receipts },
@@ -150,13 +154,13 @@ export function saveDocumentTemplateEntry(payload: {
     next.receipts[payload.scopeKey] = payload.config as ReceiptTemplateConfig;
   }
 
-  return persistTemplatesStore(next);
+  return await persistTemplatesStore(next);
 }
 
-export function saveManagementCompanyEntry(
+export async function saveManagementCompanyEntry(
   payload: Partial<ManagementCompanyProfile>
-): DocumentTemplatesStore {
-  const current = getDocumentTemplatesStore();
+): Promise<DocumentTemplatesStore> {
+  const current = await initTemplatesStoreFromDb();
   const existing = resolveManagementCompany(current);
   const nowIso = new Date().toISOString();
 
@@ -210,13 +214,16 @@ export function saveManagementCompanyEntry(
     updatedAt: nowIso,
   };
 
-  return persistTemplatesStore(next);
+  return await persistTemplatesStore(next);
 }
 
-export function upsertSaaSTenantEntry(
-  payload: Partial<SaaSTenantAgency> & { companyName: string }
-): DocumentTemplatesStore {
-  const current = getDocumentTemplatesStore();
+export async function upsertSaaSTenantEntry(
+  payload: Partial<SaaSTenantAgency> & {
+    companyName: string;
+    activateOnly?: boolean;
+  }
+): Promise<DocumentTemplatesStore> {
+  const current = await initTemplatesStoreFromDb();
   const existingList = resolveSaaSTenants(current);
   const nowIso = new Date().toISOString();
 
@@ -225,8 +232,47 @@ export function upsertSaaSTenantEntry(
   const existingIdx = existingList.findIndex(
     (t) =>
       (targetId && t.id === targetId) ||
-      (!targetId && t.companyName.trim().toLowerCase() === normalizedName)
+      (t.companyName.trim().toLowerCase() === normalizedName)
   );
+
+  // En cas de simple activation d'en-tête lors de la connexion d'un compte existant,
+  // ne jamais recréer ni écraser la liste des agences créées entre-temps
+  if (payload.activateOnly) {
+    if (existingIdx < 0) {
+      return current;
+    }
+    const targetTenant = existingList[existingIdx];
+    const updatedOnlyActive = existingList.map((item, idx) => ({
+      ...item,
+      isCurrentTenant: idx === existingIdx,
+    }));
+    const currentMgmt = resolveManagementCompany(current);
+    const nextStore: DocumentTemplatesStore = {
+      leases: { ...current.leases },
+      receipts: { ...current.receipts },
+      accountingMonths: resolveAccountingMonths(current),
+      propertyTypes: resolvePropertyTypes(current),
+      managementCompany: {
+        ...currentMgmt,
+        companyName: targetTenant.companyName,
+        tradeName: targetTenant.tradeName,
+        legalForm: targetTenant.legalForm,
+        rccm: targetTenant.rccm,
+        taxId: targetTenant.taxId,
+        licenseNumber: targetTenant.licenseNumber,
+        managerName: targetTenant.managerName,
+        address: targetTenant.address,
+        city: targetTenant.city,
+        phone: targetTenant.phone,
+        email: targetTenant.ownerEmail,
+        updatedAt: nowIso,
+      },
+      saasTenants: updatedOnlyActive,
+      saasUsers: resolveSaaSUsers(current),
+      updatedAt: nowIso,
+    };
+    return await persistTemplatesStore(nextStore);
+  }
 
   // Vérifie que le nom de l'agence immobilière est une clé unique
   const duplicateOther = existingList.find(
@@ -366,11 +412,13 @@ export function upsertSaaSTenantEntry(
     updatedAt: nowIso,
   };
 
-  return persistTemplatesStore(next);
+  return await persistTemplatesStore(next);
 }
 
-export function deleteSaaSTenantEntry(id: string): DocumentTemplatesStore {
-  const current = getDocumentTemplatesStore();
+export async function deleteSaaSTenantEntry(
+  id: string
+): Promise<DocumentTemplatesStore> {
+  const current = await initTemplatesStoreFromDb();
   const existingList = resolveSaaSTenants(current);
   const existingUsers = resolveSaaSUsers(current);
   const nowIso = new Date().toISOString();
@@ -411,10 +459,10 @@ export function deleteSaaSTenantEntry(id: string): DocumentTemplatesStore {
     updatedAt: nowIso,
   };
 
-  return persistTemplatesStore(next);
+  return await persistTemplatesStore(next);
 }
 
-export function upsertSaaSUserEntry(
+export async function upsertSaaSUserEntry(
   payload: Partial<SaaSUserAccount> & {
     fullName: string;
     email: string;
@@ -424,8 +472,8 @@ export function upsertSaaSUserEntry(
     isInitialAgencyRegistration?: boolean;
     isLoginSync?: boolean;
   }
-): DocumentTemplatesStore {
-  const current = getDocumentTemplatesStore();
+): Promise<DocumentTemplatesStore> {
+  const current = await initTemplatesStoreFromDb();
   const existingList = resolveSaaSUsers(current);
   const tenants = resolveSaaSTenants(current);
   const nowIso = new Date().toISOString();
@@ -594,18 +642,18 @@ export function upsertSaaSUserEntry(
     updatedAt: nowIso,
   };
 
-  return persistTemplatesStore(next);
+  return await persistTemplatesStore(next);
 }
 
-export function deleteSaaSUserEntry(
+export async function deleteSaaSUserEntry(
   id: string,
   actor?: {
     actorRole?: string;
     actorEmail?: string;
     actorTenantId?: string;
   }
-): DocumentTemplatesStore {
-  const current = getDocumentTemplatesStore();
+): Promise<DocumentTemplatesStore> {
+  const current = await initTemplatesStoreFromDb();
   const existingList = resolveSaaSUsers(current);
   const nowIso = new Date().toISOString();
 
@@ -671,17 +719,17 @@ export function deleteSaaSUserEntry(
     updatedAt: nowIso,
   };
 
-  return persistTemplatesStore(next);
+  return await persistTemplatesStore(next);
 }
 
-export function upsertAccountingMonthEntry(payload: {
+export async function upsertAccountingMonthEntry(payload: {
   periodMonth: string;
   periodLabel: string;
   defaultDueDay?: number;
   status?: 'open' | 'closed';
   isCurrent?: boolean;
-}): DocumentTemplatesStore {
-  const current = getDocumentTemplatesStore();
+}): Promise<DocumentTemplatesStore> {
+  const current = await initTemplatesStoreFromDb();
   const existingList = resolveAccountingMonths(current);
   const nowIso = new Date().toISOString();
 
@@ -742,13 +790,13 @@ export function upsertAccountingMonthEntry(payload: {
     updatedAt: nowIso,
   };
 
-  return persistTemplatesStore(next);
+  return await persistTemplatesStore(next);
 }
 
-export function deleteAccountingMonthEntry(
+export async function deleteAccountingMonthEntry(
   periodMonth: string
-): DocumentTemplatesStore {
-  const current = getDocumentTemplatesStore();
+): Promise<DocumentTemplatesStore> {
+  const current = await initTemplatesStoreFromDb();
   const existingList = resolveAccountingMonths(current);
   const nowIso = new Date().toISOString();
 
@@ -768,18 +816,18 @@ export function deleteAccountingMonthEntry(
     updatedAt: nowIso,
   };
 
-  return persistTemplatesStore(next);
+  return await persistTemplatesStore(next);
 }
 
-export function upsertPropertyTypeEntry(payload: {
+export async function upsertPropertyTypeEntry(payload: {
   id?: string;
   name: string;
   code?: string;
   category?: PropertyTypeItem['category'];
   defaultCharges?: string;
   description?: string;
-}): DocumentTemplatesStore {
-  const current = getDocumentTemplatesStore();
+}): Promise<DocumentTemplatesStore> {
+  const current = await initTemplatesStoreFromDb();
   const existingList = resolvePropertyTypes(current);
   const nowIso = new Date().toISOString();
 
@@ -831,11 +879,13 @@ export function upsertPropertyTypeEntry(payload: {
     updatedAt: nowIso,
   };
 
-  return persistTemplatesStore(next);
+  return await persistTemplatesStore(next);
 }
 
-export function deletePropertyTypeEntry(id: string): DocumentTemplatesStore {
-  const current = getDocumentTemplatesStore();
+export async function deletePropertyTypeEntry(
+  id: string
+): Promise<DocumentTemplatesStore> {
+  const current = await initTemplatesStoreFromDb();
   const existingList = resolvePropertyTypes(current);
   const nowIso = new Date().toISOString();
 
@@ -853,7 +903,7 @@ export function deletePropertyTypeEntry(id: string): DocumentTemplatesStore {
     updatedAt: nowIso,
   };
 
-  return persistTemplatesStore(next);
+  return await persistTemplatesStore(next);
 }
 
 function formatCurrency(amount: string | number, currency = 'FCFA'): string {
