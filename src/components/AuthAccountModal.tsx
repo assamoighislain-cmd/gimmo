@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   X,
   LogIn,
@@ -18,6 +18,10 @@ import {
   KeyRound,
   Eye,
   EyeOff,
+  Copy,
+  Check,
+  ExternalLink,
+  RefreshCw,
 } from 'lucide-react';
 import {
   type SaaSTenantAgency,
@@ -39,6 +43,13 @@ import {
   type AgencyWhatsAppNotification,
 } from '../lib/agency-notifications.ts';
 import { authenticateOrRefreshLandlordPortalClient } from '../lib/landlord-portal.ts';
+import {
+  checkCurrentDomainAuthorized,
+  formatFirebaseAuthErrorFr,
+  isFirebaseUnauthorizedDomainError,
+  firebaseConfig,
+  type DomainAuthCheckResult,
+} from '../lib/firebase.ts';
 
 interface AuthAccountModalProps {
   templatesStore: DocumentTemplatesStore;
@@ -124,6 +135,34 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
   );
   const [createdNotification, setCreatedNotification] =
     useState<AgencyWhatsAppNotification | null>(null);
+  const [domainCheck, setDomainCheck] = useState<DomainAuthCheckResult | null>(
+    null
+  );
+  const [copiedDomain, setCopiedDomain] = useState(false);
+  const emailInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    checkCurrentDomainAuthorized().then((res) => {
+      if (active) {
+        setDomainCheck(res);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleCopyCurrentDomain = async (domain: string) => {
+    if (!domain) return;
+    try {
+      await navigator.clipboard.writeText(domain);
+      setCopiedDomain(true);
+      setTimeout(() => setCopiedDomain(false), 2500);
+    } catch {
+      // ignore clipboard restriction
+    }
+  };
 
   const defaultTenantId =
     activeAccount?.tenantId ||
@@ -677,6 +716,7 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
                 <div className="relative">
                   <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
+                    ref={emailInputRef}
                     type="email"
                     required
                     value={loginEmail}
@@ -732,10 +772,31 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
                 setApprovalPendingNotice(null);
                 setSubmitting(true);
                 try {
+                  const latestCheck = await checkCurrentDomainAuthorized();
+                  setDomainCheck(latestCheck);
+                  if (!latestCheck.authorized) {
+                    setErrorMsg(
+                      `Le domaine actuel « ${latestCheck.currentDomain} » doit être ajouté dans les Domaines autorisés de Firebase Authentication avant d’utiliser le bouton Google (ou connectez-vous directement ci-dessus par Email et Mot de passe).`
+                    );
+                    return;
+                  }
                   await onGoogleLogin(defaultTenantId);
                   onClose?.();
                 } catch (err: any) {
-                  if (err?.message) {
+                  if (isFirebaseUnauthorizedDomainError(err)) {
+                    const host =
+                      typeof window !== 'undefined'
+                        ? window.location.hostname
+                        : '';
+                    setDomainCheck((prev) => ({
+                      authorized: false,
+                      currentDomain: host,
+                      authorizedDomains: prev?.authorizedDomains || [],
+                      projectId: firebaseConfig.projectId || '',
+                      firebaseSettingsUrl: `https://console.firebase.google.com/project/${encodeURIComponent(firebaseConfig.projectId || '')}/authentication/settings`,
+                    }));
+                    setErrorMsg(formatFirebaseAuthErrorFr(err));
+                  } else if (err?.message) {
                     setErrorMsg(err.message);
                   }
                 } finally {
@@ -747,6 +808,103 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
               <ShieldCheck className="w-4 h-4 text-indigo-700" />
               Continuer avec Google
             </button>
+
+            {domainCheck && !domainCheck.authorized && (
+              <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-lg space-y-2.5 text-xs text-amber-950">
+                <div className="font-extrabold flex items-center gap-1.5 text-amber-900">
+                  <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span>
+                    Domaine à autoriser dans Firebase pour « Continuer avec Google »
+                  </span>
+                </div>
+                <p className="text-[11px] text-amber-900 leading-relaxed">
+                  Vous accédez à l’application depuis le domaine{' '}
+                  <strong className="font-mono bg-white px-1.5 py-0.5 rounded-sm border border-amber-300">
+                    {domainCheck.currentDomain}
+                  </strong>
+                  , qui n’est pas encore inscrit dans les{' '}
+                  <strong>Domaines autorisés</strong> du projet Firebase{' '}
+                  <strong className="font-mono">{domainCheck.projectId}</strong>.
+                </p>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopyCurrentDomain(domainCheck.currentDomain)
+                    }
+                    className="px-2.5 py-1.5 bg-white hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-md text-[11px] font-bold inline-flex items-center gap-1.5 transition-colors"
+                  >
+                    {copiedDomain ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Domaine copié !</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copier « {domainCheck.currentDomain} »</span>
+                      </>
+                    )}
+                  </button>
+
+                  <a
+                    href={domainCheck.firebaseSettingsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1.5 bg-indigo-950 hover:bg-indigo-900 text-white rounded-md text-[11px] font-bold inline-flex items-center gap-1.5 transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-amber-300" />
+                    <span>1. Ouvrir Firebase (Domaines autorisés)</span>
+                  </a>
+
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={async () => {
+                      setSubmitting(true);
+                      setErrorMsg(null);
+                      try {
+                        const refreshed = await checkCurrentDomainAuthorized();
+                        setDomainCheck(refreshed);
+                        if (refreshed.authorized) {
+                          await onGoogleLogin(defaultTenantId);
+                          onClose?.();
+                        } else {
+                          setErrorMsg(
+                            `Le domaine « ${refreshed.currentDomain} » n’apparaît pas encore dans Firebase. Cliquez sur « Ajouter un domaine » dans Authentication > Settings > Domaines autorisés puis réessayez.`
+                          );
+                        }
+                      } catch (err: any) {
+                        if (err?.message) setErrorMsg(err.message);
+                      } finally {
+                        setSubmitting(false);
+                      }
+                    }}
+                    className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-md text-[11px] font-bold inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>2. J’ai ajouté le domaine, réessayer</span>
+                  </button>
+                </div>
+
+                <div className="pt-1.5 border-t border-amber-200/80 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                  <span className="text-amber-900">
+                    La connexion <strong>Email & Mot de passe</strong> ci-dessus fonctionne immédiatement sur ce domaine sans configuration Firebase :
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setErrorMsg(null);
+                      emailInputRef.current?.focus();
+                    }}
+                    className="font-extrabold text-indigo-900 underline hover:text-indigo-700"
+                  >
+                    Utiliser Email & Mot de passe
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-md text-[11px] text-slate-600 leading-relaxed">
               <strong className="text-slate-800">Accès collaborateurs :</strong>{' '}

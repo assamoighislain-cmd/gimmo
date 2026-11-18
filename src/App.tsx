@@ -10,7 +10,12 @@ import {
   onAuthStateChanged,
   User as FirebaseUser,
 } from 'firebase/auth';
-import { auth, googleAuthProvider } from './lib/firebase.ts';
+import {
+  auth,
+  googleAuthProvider,
+  formatFirebaseAuthErrorFr,
+  isFirebaseUnauthorizedDomainError,
+} from './lib/firebase.ts';
 import {
   Landlord,
   Property,
@@ -577,6 +582,16 @@ export default function App() {
         throw new Error('');
       }
       console.error('Google Sign-In error:', err);
+      if (isFirebaseUnauthorizedDomainError(err)) {
+        const wrapped: any = new Error(formatFirebaseAuthErrorFr(err));
+        wrapped.code = 'auth/unauthorized-domain';
+        throw wrapped;
+      }
+      if (typeof err?.code === 'string' && err.code.startsWith('auth/')) {
+        const wrapped: any = new Error(formatFirebaseAuthErrorFr(err));
+        wrapped.code = err.code;
+        throw wrapped;
+      }
       throw err;
     }
   };
