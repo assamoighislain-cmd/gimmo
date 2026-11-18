@@ -185,11 +185,13 @@ export interface SaaSUserAccount {
   id: string;
   fullName: string;
   email: string;
+  password?: string;
   whatsappPhone?: string;
   role: 'super_admin' | 'agency_admin' | 'manager' | 'agent';
   tenantId: string;
   tenantName: string;
   status: 'active' | 'suspended';
+  createdByEmail?: string;
   lastLoginAt?: string;
   createdAt: string;
 }
@@ -212,7 +214,7 @@ export interface RolePermissionSpec {
 export const ROLE_PERMISSIONS: Record<SaaSUserAccount['role'], RolePermissionSpec> = {
   super_admin: {
     role: 'super_admin',
-    label: 'Super Admin SaaS',
+    label: 'Administrateur (Super Admin)',
     canViewSaaSConsole: true,
     canApproveAgency: true,
     canManageSaaSTenants: true,
@@ -223,9 +225,9 @@ export const ROLE_PERMISSIONS: Record<SaaSUserAccount['role'], RolePermissionSpe
     canAccessRecovery: true,
     canAccessSettings: true,
     restrictionsSummary: [
-      'Seul rôle autorisé à voir « Système SaaS Multi-Agences & Console Super Administrateur ».',
-      'Seul rôle autorisé à approuver, suspendre ou supprimer une Agence Immobilière.',
-      'Restriction : Compte de gouvernance SaaS protégé (ne peut être ni supprimé ni rétrogradé par une agence).',
+      'Autorisé à créer les comptes des autres utilisateurs et à leur affecter des rôles sur toutes les agences.',
+      'Seul rôle autorisé à voir « Système SaaS Multi-Agences & Console Super Administrateur » et à approuver une agence.',
+      'Compte de gouvernance protégé (ne peut être ni supprimé ni rétrogradé par une agence).',
     ],
   },
   agency_admin: {
@@ -241,9 +243,9 @@ export const ROLE_PERMISSIONS: Record<SaaSUserAccount['role'], RolePermissionSpe
     canAccessRecovery: true,
     canAccessSettings: true,
     restrictionsSummary: [
-      'Rôle attribué par défaut lors de la création d’une agence immobilière.',
-      'Restriction 1 : N’a pas le droit de voir « Système SaaS Multi-Agences & Console Super Administrateur » ni d’approuver une agence (réservé à l’Administrateur).',
-      'Restriction 2 : N’a pas le droit de modifier ou supprimer les autres agences du réseau SaaS.',
+      'Autorisé à créer les comptes des collaborateurs de son agence et à leur affecter un rôle (Directeur d’Agence, Gestionnaire Locatif, Agent Immobilier).',
+      'Restriction 1 : N’a pas accès à la console Super Administrateur ni à l’approbation d’agences.',
+      'Restriction 2 : Ne peut ni voir ni gérer les comptes utilisateurs appartenant aux autres agences.',
     ],
   },
   manager: {
@@ -259,9 +261,9 @@ export const ROLE_PERMISSIONS: Record<SaaSUserAccount['role'], RolePermissionSpe
     canAccessRecovery: true,
     canAccessSettings: true,
     restrictionsSummary: [
-      'Restriction 1 : N’a pas le droit de voir « Système SaaS Multi-Agences & Console Super Administrateur » ni d’approuver une agence.',
-      'Restriction 2 : N’a pas le droit de supprimer un bailleur mandant.',
-      'Restriction 3 : N’a pas le droit de modifier l’identification légale de l’agence ni de gérer les comptes utilisateurs.',
+      'Restriction 1 : Interdiction de créer des comptes utilisateurs ou d’affecter/modifier des rôles (réservé à l’Administrateur et au Directeur d’Agence).',
+      'Restriction 2 : N’a pas le droit de supprimer un bailleur ni de modifier l’identification légale de l’agence.',
+      'Restriction 3 : N’a pas accès à la console Super Administrateur.',
     ],
   },
   agent: {
@@ -277,9 +279,9 @@ export const ROLE_PERMISSIONS: Record<SaaSUserAccount['role'], RolePermissionSpe
     canAccessRecovery: false,
     canAccessSettings: false,
     restrictionsSummary: [
-      'Restriction 1 : N’a pas accès aux rubriques « Recouvrement », « Paramétrage » ni à la console Super Administrateur.',
-      'Restriction 2 : N’a pas le droit de supprimer des biens, des baux, des quittances ou des bailleurs.',
-      'Restriction 3 : N’a pas le droit d’approuver une agence immobilière.',
+      'Restriction 1 : Interdiction de créer des comptes utilisateurs ou d’affecter des rôles.',
+      'Restriction 2 : N’a pas accès aux rubriques « Recouvrement », « Paramétrage » ni à la console Super Administrateur.',
+      'Restriction 3 : N’a pas le droit de supprimer des biens, des baux, des quittances ou des bailleurs.',
     ],
   },
 };

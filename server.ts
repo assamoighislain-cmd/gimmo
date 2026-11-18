@@ -514,22 +514,33 @@ async function startServer() {
       );
       res.status(201).json({ templates: updatedStore });
     } catch (error: any) {
-      res
-        .status(500)
-        .json({ error: error.message || 'Erreur sauvegarde utilisateur SaaS' });
+      const msg = error.message || 'Erreur sauvegarde utilisateur SaaS';
+      const status = msg.includes('Accès refusé') ? 403 : 400;
+      res.status(status).json({ error: msg });
     }
   });
 
   app.delete('/api/saas/users/:id', async (req, res) => {
     try {
       const id = decodeURIComponent(req.params.id);
-      const updatedStore = deleteSaaSUserEntry(id);
+      const actor = {
+        actorRole: (req.body?.actorRole || req.query.actorRole) as
+          | string
+          | undefined,
+        actorEmail: (req.body?.actorEmail || req.query.actorEmail) as
+          | string
+          | undefined,
+        actorTenantId: (req.body?.actorTenantId || req.query.actorTenantId) as
+          | string
+          | undefined,
+      };
+      const updatedStore = deleteSaaSUserEntry(id, actor);
       await broadcastRealtimeState(`Compte utilisateur SaaS supprimé : ${id}`);
       res.json({ success: true, templates: updatedStore });
     } catch (error: any) {
-      res
-        .status(500)
-        .json({ error: error.message || 'Erreur suppression utilisateur SaaS' });
+      const msg = error.message || 'Erreur suppression utilisateur SaaS';
+      const status = msg.includes('Accès refusé') ? 403 : 400;
+      res.status(status).json({ error: msg });
     }
   });
 

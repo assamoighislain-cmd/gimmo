@@ -415,54 +415,169 @@ export function deleteSaaSTenantEntry(id: string): DocumentTemplatesStore {
 }
 
 export function upsertSaaSUserEntry(
-  payload: Partial<SaaSUserAccount> & { fullName: string; email: string }
+  payload: Partial<SaaSUserAccount> & {
+    fullName: string;
+    email: string;
+    actorRole?: SaaSUserAccount['role'];
+    actorEmail?: string;
+    actorTenantId?: string;
+    isInitialAgencyRegistration?: boolean;
+    isLoginSync?: boolean;
+  }
 ): DocumentTemplatesStore {
   const current = getDocumentTemplatesStore();
   const existingList = resolveSaaSUsers(current);
   const tenants = resolveSaaSTenants(current);
   const nowIso = new Date().toISOString();
 
+  const normalizedTargetEmail = payload.email.trim().toLowerCase();
+  const isMainSuperAdmin =
+    normalizedTargetEmail === 'assamoighislain@gmail.com';
+
   const targetId = payload.id || '';
   const existingIdx = existingList.findIndex(
     (u) =>
       (targetId && u.id === targetId) ||
-      (!targetId && u.email.toLowerCase() === payload.email.trim().toLowerCase())
+      (!targetId && u.email.trim().toLowerCase() === normalizedTargetEmail)
   );
+  const existingUser = existingIdx >= 0 ? existingList[existingIdx] : null;
+
+  // 1. Synchronisation de connexion d'un compte déjà existant (sans changement de rôle)
+  if (payload.isLoginSync) {
+    if (!existingUser && !isMainSuperAdmin) {
+      throw new Error(
+        'Accès refusé : Aucun compte utilisateur existant. Seul l’Administrateur ou le Directeur de l’Agence peut créer un compte et lui affecter un rôle.'
+      );
+    }
+  } else if (payload.isInitialAgencyRegistration) {
+    // 2. Création initiale d'une nouvelle agence immobilière : rôle forcé à Directeur d'Agence
+    if (existingUser && !isMainSuperAdmin) {
+      throw new Error(
+        `Un compte utilisateur existe déjà avec l’adresse email « ${payload.email.trim()} ». Veuillez vous connecter ou utiliser une autre adresse email.`
+      );
+    }
+  } else {
+    // 3. Création de compte collaborateur ou affectation/modification de rôle :
+    //    strictement réservé à l'Administrateur (super_admin) ou au Directeur d'Agence (agency_admin)
+    const normalizedActorEmail = (payload.actorEmail || '').trim().toLowerCase();
+    const actorRecord = normalizedActorEmail
+      ? existingList.find(
+          (u) => u.email.trim().toLowerCase() === normalizedActorEmail
+        )
+      : undefined;
+
+    const effectiveActorRole: SaaSUserAccount['role'] | undefined =
+      normalizedActorEmail === 'assamoighislain@gmail.com'
+        ? 'super_admin'
+        : actorRecord?.role || payload.actorRole;
+
+    const effectiveActorTenantId =
+      actorRecord?.tenantId || payload.actorTenantId || '';
+
+    if (
+      effectiveActorRole !== 'super_admin' &&
+      effectiveActorRole !== 'agency_admin'
+    ) {
+      throw new Error(
+        'Accès refusé : Seul l’Administrateur ou le Directeur de l’Agence peut créer les comptes des autres utilisateurs et affecter des rôles.'
+      );
+    }
+
+    if (effectiveActorRole === 'agency_admin') {
+      if (isMainSuperAdmin || existingUser?.role === 'super_admin') {
+        throw new Error(
+          'Accès refusé : Un Directeur d’Agence ne peut pas modifier un compte Administrateur.'
+        );
+      }
+      if (payload.role === 'super_admin') {
+        throw new Error(
+          'Accès refusé : Un Directeur d’Agence ne peut affecter que les rôles Directeur d’Agence, Gestionnaire Locatif ou Agent Immobilier.'
+        );
+      }
+      if (
+        existingUser &&
+        effectiveActorTenantId &&
+        existingUser.tenantId !== effectiveActorTenantId
+      ) {
+        throw new Error(
+          'Accès refusé : Vous ne pouvez gérer que les utilisateurs rattachés à votre propre agence.'
+        );
+      }
+      if (
+        payload.tenantId &&
+        effectiveActorTenantId &&
+        payload.tenantId !== effectiveActorTenantId
+      ) {
+        throw new Error(
+          'Accès refusé : Vous ne pouvez rattacher des comptes qu’à votre propre agence.'
+        );
+      }
+    }
+  }
 
   const matchedTenant =
     tenants.find((t) => t.id === payload.tenantId) ||
+    (existingUser
+      ? tenants.find((t) => t.id === existingUser.tenantId)
+      : undefined) ||
     tenants.find((t) => t.isCurrentTenant) ||
     tenants[0];
 
-  const isMainSuperAdmin =
-    payload.email.trim().toLowerCase() === 'assamoighislain@gmail.com';
+  const resolvedRole: SaaSUserAccount['role'] = isMainSuperAdmin
+    ? 'super_admin'
+    : payload.isInitialAgencyRegistration
+      ? 'agency_admin'
+      : payload.isLoginSync && existingUser
+        ? existingUser.role
+        : payload.role || existingUser?.role || 'agent';
 
   let updatedList: SaaSUserAccount[];
-  if (existingIdx >= 0) {
+  if (existingIdx >= 0 && existingUser) {
     updatedList = existingList.map((item, idx) => {
       if (idx !== existingIdx) return item;
+      const nextPassword =
+        payload.password !== undefined && String(payload.password).trim() !== ''
+          ? String(payload.password).trim()
+          : item.password;
       return {
         ...item,
-        fullName: payload.fullName.trim(),
+        fullName: payload.fullName.trim() || item.fullName,
         email: payload.email.trim(),
+        password: nextPassword,
         whatsappPhone: payload.whatsappPhone ?? item.whatsappPhone,
-        role: isMainSuperAdmin ? 'super_admin' : payload.role || item.role,
-        tenantId: matchedTenant?.id || item.tenantId,
-        tenantName: matchedTenant?.companyName || item.tenantName,
-        status: payload.status || item.status,
+        role: resolvedRole,
+        tenantId: payload.isLoginSync
+          ? item.tenantId
+          : matchedTenant?.id || item.tenantId,
+        tenantName: payload.isLoginSync
+          ? item.tenantName
+          : matchedTenant?.companyName || item.tenantName,
+        status: payload.isLoginSync
+          ? item.status
+          : payload.status || item.status,
+        createdByEmail: payload.createdByEmail || item.createdByEmail,
+        lastLoginAt: payload.isLoginSync ? nowIso : item.lastLoginAt,
       };
     });
   } else {
     const newItem: SaaSUserAccount = {
-      id: targetId || `user_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      id:
+        targetId ||
+        `user_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       fullName: payload.fullName.trim(),
       email: payload.email.trim(),
+      password:
+        payload.password !== undefined && String(payload.password).trim() !== ''
+          ? String(payload.password).trim()
+          : undefined,
       whatsappPhone: payload.whatsappPhone,
-      role: isMainSuperAdmin ? 'super_admin' : payload.role || 'agency_admin',
+      role: resolvedRole,
       tenantId: matchedTenant?.id || 'tenant_gimmo_prestige',
-      tenantName: matchedTenant?.companyName || 'GIMMO PRESTIGE IMMOBILIER SARL',
+      tenantName:
+        matchedTenant?.companyName || 'GIMMO PRESTIGE IMMOBILIER SARL',
       status: payload.status || 'active',
-      lastLoginAt: nowIso,
+      createdByEmail: payload.createdByEmail || payload.actorEmail,
+      lastLoginAt: payload.isInitialAgencyRegistration ? nowIso : undefined,
       createdAt: nowIso,
     };
     updatedList = [...existingList, newItem];
@@ -482,12 +597,62 @@ export function upsertSaaSUserEntry(
   return persistTemplatesStore(next);
 }
 
-export function deleteSaaSUserEntry(id: string): DocumentTemplatesStore {
+export function deleteSaaSUserEntry(
+  id: string,
+  actor?: {
+    actorRole?: string;
+    actorEmail?: string;
+    actorTenantId?: string;
+  }
+): DocumentTemplatesStore {
   const current = getDocumentTemplatesStore();
   const existingList = resolveSaaSUsers(current);
   const nowIso = new Date().toISOString();
 
-  // Empêche la suppression du compte Super Admin principal assamoighislain@gmail.com
+  const targetUser = existingList.find((u) => u.id === id);
+  if (
+    targetUser &&
+    targetUser.email.trim().toLowerCase() === 'assamoighislain@gmail.com'
+  ) {
+    throw new Error(
+      'Le compte Administrateur principal est protégé et ne peut pas être supprimé.'
+    );
+  }
+
+  if (actor) {
+    const normalizedActorEmail = (actor.actorEmail || '').trim().toLowerCase();
+    const actorRecord = normalizedActorEmail
+      ? existingList.find(
+          (u) => u.email.trim().toLowerCase() === normalizedActorEmail
+        )
+      : undefined;
+    const effectiveRole =
+      normalizedActorEmail === 'assamoighislain@gmail.com'
+        ? 'super_admin'
+        : actorRecord?.role || actor.actorRole;
+    const effectiveTenantId =
+      actorRecord?.tenantId || actor.actorTenantId || '';
+
+    if (effectiveRole !== 'super_admin' && effectiveRole !== 'agency_admin') {
+      throw new Error(
+        'Accès refusé : Seul l’Administrateur ou le Directeur de l’Agence peut supprimer un compte utilisateur.'
+      );
+    }
+
+    if (effectiveRole === 'agency_admin' && targetUser) {
+      if (targetUser.role === 'super_admin') {
+        throw new Error(
+          'Accès refusé : Impossible de supprimer un compte Administrateur.'
+        );
+      }
+      if (effectiveTenantId && targetUser.tenantId !== effectiveTenantId) {
+        throw new Error(
+          'Accès refusé : Vous ne pouvez supprimer que les comptes de votre propre agence.'
+        );
+      }
+    }
+  }
+
   const updatedList = existingList.filter(
     (u) =>
       u.id !== id ||

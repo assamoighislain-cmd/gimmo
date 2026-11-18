@@ -37,6 +37,7 @@ import {
   buildAgencyCreatedWhatsAppDetails,
   buildAgencyApprovedWhatsAppDetails,
 } from '../lib/agency-notifications';
+import { generateLandlordPortalPassword } from '../lib/landlord-portal';
 
 interface SaaSSuperAdminPanelProps {
   templatesStore?: DocumentTemplatesStore;
@@ -154,6 +155,7 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
   const [userForm, setUserForm] = useState({
     fullName: '',
     email: '',
+    password: '',
     role: 'agency_admin' as SaaSUserAccount['role'],
     tenantId: tenants[0]?.id || 'tenant_gimmo_prestige',
     status: 'active' as SaaSUserAccount['status'],
@@ -398,6 +400,7 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
     setUserForm({
       fullName: '',
       email: '',
+      password: generateLandlordPortalPassword(),
       role: 'agency_admin',
       tenantId: tenants.find((t) => t.isCurrentTenant)?.id || tenants[0]?.id || '',
       status: 'active',
@@ -410,6 +413,7 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
     setUserForm({
       fullName: u.fullName,
       email: u.email,
+      password: u.password || '',
       role: u.role,
       tenantId: u.tenantId,
       status: u.status,
@@ -429,6 +433,10 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
     const res = await executeMutation('/api/saas/users', 'POST', {
       id: editingUserId || undefined,
       ...userForm,
+      password: userForm.password.trim() || undefined,
+      actorRole: activeAccount?.role,
+      actorEmail: activeAccount?.email,
+      actorTenantId: activeAccount?.tenantId,
     });
 
     if (!res.ok) {
@@ -457,7 +465,11 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
     const res = await executeMutation(
       `/api/saas/users/${encodeURIComponent(u.id)}`,
       'DELETE',
-      {}
+      {
+        actorRole: activeAccount?.role,
+        actorEmail: activeAccount?.email,
+        actorTenantId: activeAccount?.tenantId,
+      }
     );
     if (!res.ok) {
       setFeedback({ type: 'error', message: res.error || 'Erreur suppression utilisateur' });
@@ -1253,7 +1265,7 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-700 mb-1">
                       Nom & Prénoms *
@@ -1288,6 +1300,36 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
 
                   <div>
                     <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Mot de passe de connexion
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        value={userForm.password}
+                        onChange={(e) =>
+                          setUserForm({ ...userForm, password: e.target.value })
+                        }
+                        placeholder="Ex: GIM-4829-KP"
+                        className="w-full px-2.5 py-1.5 text-xs font-mono bg-white border border-slate-300 rounded-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setUserForm((prev) => ({
+                            ...prev,
+                            password: generateLandlordPortalPassword(),
+                          }))
+                        }
+                        className="px-2 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-sm text-[11px] font-bold shrink-0"
+                        title="Générer un mot de passe"
+                      >
+                        Générer
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
                       Rôle & Niveau d’Accès RBAC
                     </label>
                     <select
@@ -1300,10 +1342,10 @@ export const SaaSSuperAdminPanel: React.FC<SaaSSuperAdminPanelProps> = ({
                       }
                       className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-sm font-semibold"
                     >
-                      <option value="super_admin">Super Admin SaaS (Accès Total)</option>
-                      <option value="agency_admin">Admin Agence (Société de Gestion)</option>
-                      <option value="manager">Gestionnaire Locatif & Comptable</option>
-                      <option value="agent">Agent Immobilier Terrain</option>
+                      <option value="super_admin">Administrateur (Super Admin)</option>
+                      <option value="agency_admin">Directeur d’Agence</option>
+                      <option value="manager">Gestionnaire Locatif</option>
+                      <option value="agent">Agent Immobilier</option>
                     </select>
                   </div>
 

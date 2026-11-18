@@ -34,6 +34,7 @@ import { PropertyTypesPanel } from './components/PropertyTypesPanel.tsx';
 import { LandlordsPanel } from './components/LandlordsPanel.tsx';
 import { UserGuideModal } from './components/UserGuideModal.tsx';
 import { AgencyProfilePanel } from './components/AgencyProfilePanel.tsx';
+import { AgencyUsersPanel } from './components/AgencyUsersPanel.tsx';
 import { SaaSSuperAdminPanel } from './components/SaaSSuperAdminPanel.tsx';
 import { AuthAccountModal } from './components/AuthAccountModal.tsx';
 import { LandlordPortalView } from './components/LandlordPortalView.tsx';
@@ -371,10 +372,11 @@ export default function App() {
     ) => {
       if (!isEffectiveOffline) {
         try {
+          const hasBody = body && Object.keys(body).length > 0;
           const res = await fetch(url, {
             method,
             headers: { 'Content-Type': 'application/json' },
-            body: method === 'DELETE' ? undefined : JSON.stringify(body),
+            body: method === 'DELETE' && !hasBody ? undefined : JSON.stringify(body),
           });
           const contentType = res.headers.get('content-type') || '';
           if (res.ok && contentType.includes('application/json')) {
@@ -470,52 +472,112 @@ export default function App() {
     try {
       const cred = await signInWithPopup(auth, googleAuthProvider);
       const fbUser = cred.user;
+      const emailLower = (fbUser.email || '').trim().toLowerCase();
       const saasTenants = resolveSaaSTenants(templatesStore);
       const saasUsers = resolveSaaSUsers(templatesStore);
-      const chosenAgency =
-        saasTenants.find((t) => t.id === targetTenantId) || saasTenants[0];
+      const isPrimarySuperAdmin = emailLower === 'assamoighislain@gmail.com';
 
-      const existingAccount = saasUsers.find(
-        (u) => u.email.toLowerCase() === (fbUser.email || '').toLowerCase()
-      );
+      const existingAccount = isPrimarySuperAdmin
+        ? saasUsers.find(
+            (u) =>
+              u.email.trim().toLowerCase() === emailLower &&
+              u.role === 'super_admin'
+          ) || saasUsers.find((u) => u.email.trim().toLowerCase() === emailLower)
+        : [...saasUsers]
+            .reverse()
+            .find((u) => u.email.trim().toLowerCase() === emailLower);
+
+      if (!existingAccount && !isPrimarySuperAdmin) {
+        await signOut(auth).catch(() => {});
+        throw new Error(
+          'Accès refusé : Aucun compte utilisateur n’existe pour cette adresse Google. Seul l’Administrateur ou le Directeur de l’Agence peut créer les comptes des autres utilisateurs et leur affecter un rôle.'
+        );
+      }
+
+      if (existingAccount?.status === 'suspended' && !isPrimarySuperAdmin) {
+        await signOut(auth).catch(() => {});
+        throw new Error(
+          'Ce compte utilisateur est suspendu par l’Administrateur ou le Directeur de l’Agence.'
+        );
+      }
+
+      const fallbackAgency =
+        saasTenants.find((t) => t.id === targetTenantId) ||
+        saasTenants.find((t) => t.isCurrentTenant) ||
+        saasTenants[0];
+
+      const linkedAgency = existingAccount
+        ? saasTenants.find((t) => t.id === existingAccount.tenantId) ||
+          saasTenants.find(
+            (t) =>
+              t.companyName.trim().toLowerCase() ===
+              existingAccount.tenantName.trim().toLowerCase()
+          ) ||
+          fallbackAgency
+        : fallbackAgency;
+
+      const isSuperAdminUser =
+        isPrimarySuperAdmin || existingAccount?.role === 'super_admin';
+
+      if (!isSuperAdminUser && linkedAgency?.status === 'pending_approval') {
+        await signOut(auth).catch(() => {});
+        throw new Error(
+          `L’agence immobilière « ${linkedAgency.companyName} » est en attente d’approbation par le Super Admin.`
+        );
+      }
+
+      if (!isSuperAdminUser && linkedAgency?.status === 'suspended') {
+        await signOut(auth).catch(() => {});
+        throw new Error(
+          `L’agence immobilière « ${linkedAgency.companyName} » est actuellement suspendue.`
+        );
+      }
 
       const nowIso = new Date().toISOString();
       const accountToUse: SaaSUserAccount = existingAccount
         ? {
             ...existingAccount,
-            tenantId: chosenAgency.id,
-            tenantName: chosenAgency.companyName,
+            role: isPrimarySuperAdmin ? 'super_admin' : existingAccount.role,
+            tenantId: linkedAgency?.id || existingAccount.tenantId,
+            tenantName: linkedAgency?.companyName || existingAccount.tenantName,
+            lastLoginAt: nowIso,
           }
         : {
-            id: `usr-${fbUser.uid.slice(0, 8)}`,
-            fullName: fbUser.displayName || fbUser.email || 'Utilisateur Agence',
-            email: fbUser.email || 'utilisateur@agence.ci',
-            role:
-              (fbUser.email || '').toLowerCase() === 'assamoighislain@gmail.com'
-                ? 'super_admin'
-                : 'agency_admin',
-            tenantId: chosenAgency.id,
-            tenantName: chosenAgency.companyName,
+            id: 'usr-super-admin-ghislain',
+            fullName: fbUser.displayName || 'Ghislain Assamoi',
+            email: emailLower,
+            role: 'super_admin',
+            tenantId: linkedAgency.id,
+            tenantName: linkedAgency.companyName,
             status: 'active',
             lastLoginAt: nowIso,
             createdAt: nowIso.split('T')[0],
           };
 
-      await performMutationWithOfflineSupport(
-        '/api/saas/tenants',
-        'POST',
-        { ...chosenAgency, isCurrentTenant: true },
-        `Activation de l'agence ${chosenAgency.companyName}`
-      );
+      if (linkedAgency) {
+        await performMutationWithOfflineSupport(
+          '/api/saas/tenants',
+          'POST',
+          { ...linkedAgency, isCurrentTenant: true },
+          `Activation de l'agence ${linkedAgency.companyName}`
+        );
+      }
       await performMutationWithOfflineSupport(
         '/api/saas/users',
         'POST',
-        accountToUse,
+        { ...accountToUse, isLoginSync: true },
         `Connexion compte ${accountToUse.fullName}`
       );
-      await handleAccountLoginSuccess(accountToUse, chosenAgency);
-    } catch (err) {
+      await handleAccountLoginSuccess(accountToUse, linkedAgency);
+    } catch (err: any) {
+      if (
+        err?.code === 'auth/popup-closed-by-user' ||
+        err?.code === 'auth/cancelled-popup-request'
+      ) {
+        throw new Error('');
+      }
       console.error('Google Sign-In error:', err);
+      throw err;
     }
   };
 
@@ -715,6 +777,18 @@ export default function App() {
       playAgencyCreatedSound();
     }
   }, [isSuperAdminAccount, pendingAgenciesCount]);
+
+  useEffect(() => {
+    if (!activeAccount) return;
+    if (activeSection === 'settings' && !currentRolePermissions.canAccessSettings) {
+      setActiveSection('map_properties');
+    } else if (
+      activeSection === 'financial_recovery' &&
+      !currentRolePermissions.canAccessRecovery
+    ) {
+      setActiveSection('map_properties');
+    }
+  }, [activeAccount, activeSection, currentRolePermissions]);
 
   // Si un bailleur est connecté à son Portail Propriétaire dédié, afficher directement son espace sécurisé
   if (landlordPortalSession) {
@@ -1472,10 +1546,18 @@ export default function App() {
                 {/* 1. Identification de la Société de Gestion (En-tête officiel de tous les documents PDF) */}
                 <AgencyProfilePanel
                   templatesStore={templatesStore}
+                  canEdit={currentRolePermissions.canEditAgencyProfile}
                   onSuccess={fetchOverviewData}
                 />
 
-                {/* 2. Système SaaS Multi-Agences & Console Super Administrateur — Visible uniquement par l'Administrateur (Super Admin) */}
+                {/* 2. Gestion des Comptes Utilisateurs & Attribution des Rôles (Réservée à l'Administrateur et au Directeur d'Agence) */}
+                <AgencyUsersPanel
+                  templatesStore={templatesStore}
+                  activeAccount={activeAccount}
+                  onSuccess={fetchOverviewData}
+                />
+
+                {/* 3. Système SaaS Multi-Agences & Console Super Administrateur — Visible uniquement par l'Administrateur (Super Admin) */}
                 {isSuperAdminAccount && (
                   <SaaSSuperAdminPanel
                     templatesStore={templatesStore}
@@ -1486,7 +1568,7 @@ export default function App() {
                   />
                 )}
 
-                {/* 3. Guide d'Utilisateur Officiel avec exportation PDF directe */}
+                {/* 4. Guide d'Utilisateur Officiel avec exportation PDF directe */}
                 <UserGuideModal isModal={false} />
 
                 {/* Gestion complète des Bailleurs (Propriétaires Mandants) directement intégrée dans la rubrique Paramétrage */}

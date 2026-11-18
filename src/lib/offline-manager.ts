@@ -751,6 +751,11 @@ export function applyOptimisticMutationToSnapshot(
           ? {
               ...u,
               ...body,
+              password:
+                body.password !== undefined && String(body.password).trim() !== ''
+                  ? String(body.password).trim()
+                  : u.password,
+              createdByEmail: body.createdByEmail || body.actorEmail || u.createdByEmail,
               tenantId: matchedTenant?.id || body.tenantId || u.tenantId,
               tenantName: matchedTenant?.companyName || body.tenantName || u.tenantName,
             }
@@ -763,15 +768,20 @@ export function applyOptimisticMutationToSnapshot(
           id: targetId || `saas_user_off_${tempId}`,
           fullName: String(body.fullName || '').trim(),
           email: String(body.email || '').trim(),
+          password:
+            body.password !== undefined && String(body.password).trim() !== ''
+              ? String(body.password).trim()
+              : undefined,
           whatsappPhone: body.whatsappPhone ? String(body.whatsappPhone).trim() : undefined,
-          role: body.role || 'agency_admin',
+          role: body.role || 'agent',
           tenantId: matchedTenant?.id || body.tenantId || 'tenant_gimmo_prestige',
           tenantName:
             matchedTenant?.companyName ||
             body.tenantName ||
             'GIMMO PRESTIGE IMMOBILIER SARL',
           status: body.status || 'active',
-          lastLoginAt: nowIso,
+          createdByEmail: body.createdByEmail || body.actorEmail,
+          lastLoginAt: body.isInitialAgencyRegistration ? nowIso : undefined,
           createdAt: nowIso,
         },
       ];
@@ -839,6 +849,38 @@ export async function executeMutation(
   body: Record<string, any> = {},
   description = 'Modification Gimmo'
 ): Promise<{ ok: boolean; queuedOffline?: boolean; data?: any; error?: string }> {
+  if (
+    (url === '/api/saas/users' || url.startsWith('/api/saas/users/')) &&
+    !body.isInitialAgencyRegistration &&
+    !body.isLoginSync
+  ) {
+    const actorMail = String(body.actorEmail || '').trim().toLowerCase();
+    const isAuthorizedActor =
+      actorMail === 'assamoighislain@gmail.com' ||
+      body.actorRole === 'super_admin' ||
+      body.actorRole === 'agency_admin';
+
+    if (!isAuthorizedActor) {
+      return {
+        ok: false,
+        error:
+          'Accès refusé : Seul l’Administrateur ou le Directeur de l’Agence peut créer les comptes des autres utilisateurs et affecter des rôles.',
+      };
+    }
+
+    if (
+      body.actorRole === 'agency_admin' &&
+      actorMail !== 'assamoighislain@gmail.com' &&
+      body.role === 'super_admin'
+    ) {
+      return {
+        ok: false,
+        error:
+          'Accès refusé : Un Directeur d’Agence ne peut affecter que les rôles Directeur d’Agence, Gestionnaire Locatif ou Agent Immobilier.',
+      };
+    }
+  }
+
   if (!navigator.onLine) {
     enqueueOfflineMutation({ url, method, body, description });
     const snap = applyOptimisticMutationToSnapshot(url, method, body);
@@ -849,11 +891,12 @@ export async function executeMutation(
     };
   }
 
+  const hasBodyPayload = Object.keys(body || {}).length > 0;
   const sendFetch = () =>
     fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: method === 'DELETE' ? undefined : JSON.stringify(body),
+      body: method === 'DELETE' && !hasBodyPayload ? undefined : JSON.stringify(body),
     });
 
   try {

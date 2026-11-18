@@ -206,10 +206,35 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
 
     if (foundUser) {
       if (foundUser.status === 'suspended') {
-        setErrorMsg('Ce compte utilisateur est suspendu par l’administrateur.');
+        setErrorMsg(
+          'Ce compte utilisateur est suspendu par l’Administrateur ou le Directeur d’Agence.'
+        );
         return;
       }
-      await activateAccountAndAgency(foundUser);
+
+      const storedPassword = (foundUser.password || '').trim();
+      if (storedPassword) {
+        const typedPassword = loginPassword.trim();
+        const isPasswordMatch =
+          typedPassword === storedPassword ||
+          (storedPassword.toUpperCase().startsWith('GIM-') &&
+            typedPassword.toUpperCase() === storedPassword.toUpperCase());
+        if (!isPasswordMatch) {
+          setErrorMsg('Mot de passe incorrect pour ce compte utilisateur.');
+          return;
+        }
+      }
+
+      const syncedUser: SaaSUserAccount = {
+        ...foundUser,
+        lastLoginAt: new Date().toISOString(),
+      };
+      await executeMutation('/api/saas/users', 'POST', {
+        ...syncedUser,
+        isLoginSync: true,
+      }).catch(() => {});
+
+      await activateAccountAndAgency(syncedUser);
       return;
     }
 
@@ -229,15 +254,16 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
         lastLoginAt: nowIso,
         createdAt: nowIso.split('T')[0],
       };
-      await executeMutation('/api/saas/users', 'POST', superAdminAccount).catch(
-        () => {}
-      );
+      await executeMutation('/api/saas/users', 'POST', {
+        ...superAdminAccount,
+        isLoginSync: true,
+      }).catch(() => {});
       await activateAccountAndAgency(superAdminAccount);
       return;
     }
 
     setErrorMsg(
-      'Aucun compte trouvé pour cette adresse email. Veuillez créer votre compte et enregistrer votre agence dans l’onglet « Créer un compte ».'
+      'Aucun compte trouvé pour cette adresse email. Seul l’Administrateur ou le Directeur de l’Agence peut créer les comptes des autres utilisateurs et leur affecter un rôle. Pour enregistrer une nouvelle agence immobilière, utilisez l’onglet « Créer une agence ».'
     );
   };
 
@@ -387,6 +413,7 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
         id: `usr-${Date.now()}`,
         fullName: regFullName.trim(),
         email: normalizedEmail,
+        password: regPassword.trim(),
         whatsappPhone: cleanWhatsapp,
         role: assignedRole,
         tenantId: newAgencyPayload.id,
@@ -399,9 +426,18 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
       const userRes = await executeMutation(
         '/api/saas/users',
         'POST',
-        newUserAccount,
+        {
+          ...newUserAccount,
+          isInitialAgencyRegistration: true,
+        },
         `Création compte Directeur d'Agence ${newUserAccount.fullName}`
       );
+      if (!userRes.ok) {
+        throw new Error(
+          userRes.error ||
+            'Impossible de créer le compte initial du Directeur d’Agence.'
+        );
+      }
 
       const latestTemplates =
         (userRes.data?.templates as DocumentTemplatesStore | undefined) ||
@@ -533,7 +569,7 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
           }`}
         >
           <UserPlus className="w-3.5 h-3.5" />
-          Créer un compte
+          Créer une agence
         </button>
         {onLandlordPortalLoginSuccess && (
           <button
@@ -690,15 +726,33 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
             {/* Connexion Google Auth */}
             <button
               type="button"
+              disabled={submitting}
               onClick={async () => {
-                await onGoogleLogin(defaultTenantId);
-                onClose?.();
+                setErrorMsg(null);
+                setApprovalPendingNotice(null);
+                setSubmitting(true);
+                try {
+                  await onGoogleLogin(defaultTenantId);
+                  onClose?.();
+                } catch (err: any) {
+                  if (err?.message) {
+                    setErrorMsg(err.message);
+                  }
+                } finally {
+                  setSubmitting(false);
+                }
               }}
-              className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 text-indigo-950 border border-slate-300 rounded-md text-xs font-bold shadow-2xs flex items-center justify-center gap-2 transition-colors"
+              className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 text-indigo-950 border border-slate-300 rounded-md text-xs font-bold shadow-2xs flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
             >
               <ShieldCheck className="w-4 h-4 text-indigo-700" />
               Continuer avec Google
             </button>
+
+            <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-md text-[11px] text-slate-600 leading-relaxed">
+              <strong className="text-slate-800">Accès collaborateurs :</strong>{' '}
+              Seul l’<strong>Administrateur</strong> ou le{' '}
+              <strong>Directeur de l’Agence</strong> peut créer les comptes des autres utilisateurs et leur affecter un rôle.
+            </div>
           </div>
         ) : tab === 'landlord_portal' ? (
           /* Connexion dédiée au Portail Bailleur (Propriétaires Mandants) */
@@ -775,13 +829,13 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
           <form noValidate onSubmit={handleRegisterSubmit} className="space-y-4">
             <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-md text-xs text-indigo-950 space-y-1">
               <div className="font-bold flex items-center justify-between">
-                <span>Rôle attribué par défaut à la création :</span>
+                <span>Rôle attribué au fondateur de l’agence :</span>
                 <span className="px-2 py-0.5 bg-indigo-950 text-white rounded-sm text-[11px] font-bold">
                   Directeur d’Agence
                 </span>
               </div>
               <p className="text-[11px] text-slate-600">
-                Une notification sonore et un message WhatsApp sont déclenchés dès la création de l’agence. Seul le Super Admin a le droit d’approuver une nouvelle agence immobilière.
+                Ce formulaire enregistre une nouvelle agence immobilière (approuvée par le Super Admin). Seul l’Administrateur ou le Directeur de l’Agence peut ensuite créer les comptes des autres utilisateurs et leur affecter des rôles.
               </p>
             </div>
 

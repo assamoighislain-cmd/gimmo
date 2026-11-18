@@ -1,0 +1,171 @@
+{
+  "leases": {
+    "default": {
+      "presetId": "habitation_standard",
+      "accentColor": "#1E1B4B",
+      "documentTitle": "CONTRAT DE BAIL LOCATIF",
+      "documentSubtitle": "Contrat N° {{numero_contrat}} — Établi pour {{nom_bailleur}} par {{nom_societe_gestion}}",
+      "showPostgisCoords": true,
+      "article1Title": "ARTICLE 1 : DÉSIGNATION DES PARTIES & MANDATAIRE",
+      "article1Body": "ENTRE LE BAILLEUR : {{nom_bailleur}}, immatriculé sous le N° {{id_fiscal_bailleur}}, demeurant à {{adresse_bailleur}}, Téléphone : {{telephone_bailleur}}, représenté aux présentes par son mandataire exclusif la société {{nom_societe_gestion}} (RCCM : {{rccm_societe_gestion}}, {{agrement_societe_gestion}}), sise à {{adresse_societe_gestion}}, Tél : {{telephone_societe_gestion}}.\n\nET LE PRENEUR (LOCATAIRE) : M./Mme {{nom_locataire}}, titulaire de la pièce d’identité N° {{cni_locataire}}, exerçant la profession de {{profession_locataire}} ({{employeur_locataire}}), joignable sur WhatsApp au {{whatsapp_locataire}} et par email à {{email_locataire}}.",
+      "article2Title": "ARTICLE 2 : DÉSIGNATION ET GÉOLOCALISATION DU BIEN",
+      "article2Body": "Référence : {{reference_bien}} — {{titre_bien}} ({{type_bien}})\nSituation géographique : {{adresse_bien}}, Quartier {{quartier_bien}}, {{ville_bien}}.\nConsistance : Superficie de {{surface_bien}} m² comprenant {{pieces_bien}} pièces principales.",
+      "article3Title": "ARTICLE 3 : DURÉE ET PRISE D’EFFET",
+      "article3Body": "Le présent bail prend effet le {{date_debut}} et se terminera le {{date_fin}}, sauf dénonciation par l’une des parties dans le respect du préavis légal de trois (3) mois.",
+      "article4Title": "ARTICLE 4 : LOYER, CHARGES ET DÉPÔT DE GARANTIE",
+      "article4Body": "• Loyer mensuel principal : {{loyer_mensuel}}\n• Provision mensuelle sur charges : {{charges}}\n• Total mensuel exigible : {{total_mensuel}} payable d’avance au plus tard le {{jour_echeance}} de chaque mois auprès de {{nom_societe_gestion}}.\n• Dépôt de garantie (Caution) versé à la signature : {{caution}}.",
+      "article5Title": "ARTICLE 5 : DISPOSITIONS PARTICULIÈRES DU BAILLEUR",
+      "article5Body": "{{note_bailleur}}\n\nClauses additionnelles du contrat : {{clauses_contrat}}",
+      "article6Title": "ARTICLE 6 : ENTRETIEN, ASSURANCE ET RÉSILIATION",
+      "article6Body": "Le Preneur s’engage à user des lieux loués en bon père de famille, à souscrire une assurance multirisque habitation dès la remise des clés et à ne procéder à aucune transformation sans l’accord écrit préalable du Bailleur ou de {{nom_societe_gestion}}.",
+      "landlordSignatureLabel": "POUR LE BAILLEUR ({{nom_societe_gestion}})",
+      "tenantSignatureLabel": "LE PRENEUR (Locataire)",
+      "signatureSubtext": "Signature précédée de la mention « Lu et approuvé »",
+      "footerText": "{{nom_societe_gestion}} · RCCM {{rccm_societe_gestion}} · Jeton d’authenticité : {{jeton_partage}}"
+    }
+  },
+  "receipts": {
+    "default": {
+      "presetId": "quittance_classique",
+      "accentColor": "#0F172A",
+      "agencyBrandTitle": "{{nom_societe_gestion}}",
+      "agencyBrandSubtitle": "{{adresse_societe_gestion}} · Tél : {{telephone_societe_gestion}}",
+      "documentTitle": "QUITTANCE DE LOYER",
+      "rentRowLabel": "Loyer nu mensuel ({{periode}})",
+      "chargesRowLabel": "Provision sur charges locatives (syndic, entretien, sécurité)",
+      "attestationBody": "Nous soussignés, {{nom_societe_gestion}}, agissant en qualité de mandataire de {{nom_bailleur}}, reconnaissons avoir reçu de {{nom_locataire}} la somme de {{montant_paye}} au titre du loyer et des charges pour la période de {{periode}} concernant le bien {{titre_bien}} situé à {{adresse_bien}}, {{quartier_bien}}.\n\nCette quittance annule tous les reçus qui auraient pu être établis précédemment en cas de paiement partiel de la présente échéance.",
+      "signatureLabel": "Pour la Société de Gestion {{nom_societe_gestion}} (Cachet & Signature)",
+      "footerNote": "{{nom_societe_gestion}} · RCCM {{rccm_societe_gestion}} · ID Fiscal {{id_fiscal_societe_gestion}} · Jeton : {{jeton_partage}}"
+    }
+  },
+  "accountingMonths": [
+    {
+      "periodMonth": "2026-12",
+      "periodLabel": "Décembre 2026",
+      "defaultDueDay": 5,
+      "status": "open",
+      "isCurrent": false,
+      "createdAt": "2026-11-01T00:00:00.000Z"
+    },
+    {
+      "periodMonth": "2026-11",
+      "periodLabel": "Novembre 2026",
+      "defaultDueDay": 5,
+      "status": "open",
+      "isCurrent": true,
+      "createdAt": "2026-11-01T00:00:00.000Z"
+    },
+    {
+      "periodMonth": "2026-10",
+      "periodLabel": "Octobre 2026",
+      "defaultDueDay": 5,
+      "status": "closed",
+      "isCurrent": false,
+      "createdAt": "2026-10-01T00:00:00.000Z"
+    }
+  ],
+  "propertyTypes": [
+    {
+      "id": "type_appartement",
+      "name": "Appartement",
+      "code": "APPT",
+      "category": "habitation",
+      "defaultCharges": "45000",
+      "description": "Logement résidentiel en immeuble collectif avec syndic et parties communes",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "type_villa",
+      "name": "Villa",
+      "code": "VILLA",
+      "category": "habitation",
+      "defaultCharges": "80000",
+      "description": "Maison individuelle ou villa duplex avec jardin privatif et dépendance",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "type_bureau",
+      "name": "Bureau",
+      "code": "BUR",
+      "category": "professionnel",
+      "defaultCharges": "75000",
+      "description": "Plateau professionnel ou espace de travail tertiaire climatisé",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "type_local_commercial",
+      "name": "Local Commercial",
+      "code": "COM",
+      "category": "commercial",
+      "defaultCharges": "50000",
+      "description": "Boutique, showroom ou magasin en rez-de-chaussée avec vitrine sur rue",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "type_studio",
+      "name": "Studio",
+      "code": "STD",
+      "category": "habitation",
+      "defaultCharges": "20000",
+      "description": "Logement compact de 1 à 2 pièces adapté aux jeunes actifs et étudiants",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "managementCompany": {
+    "companyName": "GIMMO PRESTIGE IMMOBILIER SARL",
+    "tradeName": "GIMMO GESTION & PATRIMOINE",
+    "legalForm": "SARL au capital de 10 000 000 FCFA",
+    "rccm": "CI-ABJ-03-2024-B12-04892",
+    "taxId": "CC 2408915 M",
+    "licenseNumber": "Agrément Ministériel MCLU N° 0184/MCLU/DGLCV/AG",
+    "managerName": "M. Ghislain Assamoi",
+    "managerTitle": "Directeur Général & Administrateur de Biens",
+    "address": "Boulevard Latrille, Cocody Deux-Plateaux Vallons, Immeuble Prestige 3e étage",
+    "city": "Abidjan — Côte d’Ivoire",
+    "phone": "+225 07 07 00 11 22 / +225 27 22 41 00 00",
+    "email": "assamoighislain@gmail.com",
+    "website": "www.gimmo-prestige.ci",
+    "bankInfo": "SGBCI CI008 01111 012345678901 88 · Orange Money Marchand : #144*821#",
+    "headerSlogan": "Société de Gérance Locative, Syndic de Copropriété & Administration de Patrimoine Immobilier",
+    "updatedAt": "2026-11-01T00:00:00.000Z"
+  },
+  "saasTenants": [
+    {
+      "id": "tenant_gimmo_prestige",
+      "companyName": "GIMMO PRESTIGE IMMOBILIER SARL",
+      "tradeName": "GIMMO GESTION & PATRIMOINE",
+      "legalForm": "SARL au capital de 10 000 000 FCFA",
+      "rccm": "CI-ABJ-03-2024-B12-04892",
+      "taxId": "CC 2408915 M",
+      "licenseNumber": "Agrément MCLU N° 0184/MCLU/DGLCV/AG",
+      "managerName": "M. Ghislain Assamoi",
+      "ownerEmail": "assamoighislain@gmail.com",
+      "phone": "+225 07 07 00 11 22",
+      "whatsappPhone": "+225 07 07 00 11 22",
+      "address": "Cocody Deux-Plateaux Vallons, Boulevard Latrille",
+      "city": "Abidjan",
+      "plan": "enterprise",
+      "status": "active",
+      "monthlyFeeFcfa": 150000,
+      "maxProperties": 500,
+      "maxLandlords": 100,
+      "subscriptionEndsAt": "2027-12-31",
+      "isCurrentTenant": true,
+      "createdAt": "2026-01-10T00:00:00.000Z"
+    }
+  ],
+  "saasUsers": [
+    {
+      "id": "user_super_admin_main",
+      "fullName": "Ghislain Assamoi",
+      "email": "assamoighislain@gmail.com",
+      "role": "super_admin",
+      "tenantId": "tenant_gimmo_prestige",
+      "tenantName": "GIMMO PRESTIGE IMMOBILIER SARL",
+      "status": "active",
+      "lastLoginAt": "2026-11-13T08:30:00.000Z",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "updatedAt": "2026-11-17T23:40:21.727Z"
+}
