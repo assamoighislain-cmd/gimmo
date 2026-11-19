@@ -193,8 +193,22 @@ export default function App() {
   const [confirmDeleteTopLandlord, setConfirmDeleteTopLandlord] =
     useState(false);
 
-  // Compte utilisateur connecté : null au lancement pour afficher la Page de Connexion en première page
-  const [activeAccount, setActiveAccount] = useState<SaaSUserAccount | null>(null);
+  // Restauration sécurisée de la session active (sinon affichage de la Page de Connexion)
+  const [activeAccount, setActiveAccount] = useState<SaaSUserAccount | null>(
+    () => {
+      try {
+        const raw = localStorage.getItem('gimmo_active_account_v1');
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as Partial<SaaSUserAccount>;
+        if (parsed && parsed.id && parsed.email && parsed.role) {
+          return parsed as SaaSUserAccount;
+        }
+      } catch {
+        // ignore corrupted storage
+      }
+      return null;
+    }
+  );
 
   // Session dédiée du Portail Bailleur (Espace Propriétaire Mandant)
   const [landlordPortalSession, setLandlordPortalSession] =

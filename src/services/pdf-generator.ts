@@ -32,6 +32,7 @@ import { validateWhatsAppPhone } from '../lib/agency-notifications.ts';
 import {
   loadAppSettingsFromSupabase,
   saveAppSettingsToSupabase,
+  verifySupabaseAuthPassword,
 } from '../db/supabase.ts';
 import { getAllUsers, upsertUserRecord } from '../db/users.ts';
 
@@ -388,6 +389,40 @@ export async function upsertSaaSTenantEntry(
     };
   }
 
+  // Garantir que le propriétaire (ownerEmail) d'une agence créée dispose d'un compte Directeur d'Agence
+  let nextUsers = resolveSaaSUsers(current);
+  const savedTenant = updatedList.find(
+    (t) =>
+      (targetId && t.id === targetId) ||
+      t.companyName.trim().toLowerCase() === normalizedName
+  );
+  const ownerMail = (savedTenant?.ownerEmail || '').trim().toLowerCase();
+  if (
+    savedTenant &&
+    ownerMail &&
+    ownerMail.includes('@') &&
+    ownerMail !== 'direction@agence.ci' &&
+    !nextUsers.some((u) => u.email.trim().toLowerCase() === ownerMail)
+  ) {
+    nextUsers = [
+      ...nextUsers,
+      {
+        id: `user_owner_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        fullName: savedTenant.managerName || ownerMail.split('@')[0],
+        email: ownerMail,
+        whatsappPhone: savedTenant.whatsappPhone || savedTenant.phone,
+        role:
+          ownerMail === 'assamoighislain@gmail.com'
+            ? 'super_admin'
+            : 'agency_admin',
+        tenantId: savedTenant.id,
+        tenantName: savedTenant.companyName,
+        status: 'active',
+        createdAt: nowIso,
+      },
+    ];
+  }
+
   const next: DocumentTemplatesStore = {
     leases: { ...current.leases },
     receipts: { ...current.receipts },
@@ -395,7 +430,7 @@ export async function upsertSaaSTenantEntry(
     propertyTypes: resolvePropertyTypes(current),
     managementCompany: nextManagementCompany,
     saasTenants: updatedList,
-    saasUsers: resolveSaaSUsers(current),
+    saasUsers: nextUsers,
     updatedAt: nowIso,
   };
 
@@ -670,15 +705,22 @@ export async function authenticateSaaSUserEntry(
   email: string,
   password: string
 ): Promise<SaaSLoginResult> {
-  const normalizedEmail = String(email || '').trim().toLowerCase();
-  const typedPassword = String(password || '').trim();
+  const stripInvisible = (value: string) =>
+    String(value || '')
+      .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, ' ')
+      .trim();
+
+  const rawIdentifier = stripInvisible(email);
+  const normalizedEmail = rawIdentifier.toLowerCase();
+  const identifierDigits = rawIdentifier.replace(/\D+/g, '');
+  const typedPassword = stripInvisible(password);
 
   if (!normalizedEmail) {
     return {
       ok: false,
       status: 400,
       code: 'INVALID_INPUT',
-      error: 'Veuillez saisir votre adresse email professionnelle.',
+      error: 'Veuillez saisir votre adresse email professionnelle ou numéro WhatsApp.',
     };
   }
 
@@ -689,6 +731,17 @@ export async function authenticateSaaSUserEntry(
 
   const isMainSuperAdmin = normalizedEmail === 'assamoighislain@gmail.com';
 
+  const matchesPhone = (phone?: string) => {
+    if (identifierDigits.length < 8 || !phone) return false;
+    const targetDigits = phone.replace(/\D+/g, '');
+    if (targetDigits.length < 8) return false;
+    return (
+      targetDigits === identifierDigits ||
+      targetDigits.endsWith(identifierDigits) ||
+      identifierDigits.endsWith(targetDigits)
+    );
+  };
+
   let foundUser: SaaSUserAccount | undefined = isMainSuperAdmin
     ? users.find(
         (u) =>
@@ -697,10 +750,39 @@ export async function authenticateSaaSUserEntry(
       ) || users.find((u) => u.email.trim().toLowerCase() === normalizedEmail)
     : [...users]
         .reverse()
-        .find((u) => u.email.trim().toLowerCase() === normalizedEmail);
+        .find((u) => u.email.trim().toLowerCase() === normalizedEmail) ||
+      (identifierDigits.length >= 8
+        ? [...users].reverse().find((u) => matchesPhone(u.whatsappPhone))
+        : undefined);
 
-  // Fallback : si l'utilisateur existe dans la table public.users de Supabase mais pas encore dans saasUsers
+  // Fallback 1 : propriétaire déclaré sur une agence (ownerEmail ou whatsappPhone)
   if (!foundUser && !isMainSuperAdmin) {
+    const matchedOwnerTenant = tenants.find(
+      (t) =>
+        (t.ownerEmail &&
+          t.ownerEmail.trim().toLowerCase() === normalizedEmail) ||
+        matchesPhone(t.whatsappPhone || t.phone)
+    );
+    if (matchedOwnerTenant) {
+      foundUser = {
+        id: `user_owner_${matchedOwnerTenant.id}`,
+        fullName:
+          matchedOwnerTenant.managerName ||
+          matchedOwnerTenant.ownerEmail.split('@')[0],
+        email: matchedOwnerTenant.ownerEmail.trim().toLowerCase(),
+        whatsappPhone:
+          matchedOwnerTenant.whatsappPhone || matchedOwnerTenant.phone,
+        role: 'agency_admin',
+        tenantId: matchedOwnerTenant.id,
+        tenantName: matchedOwnerTenant.companyName,
+        status: 'active',
+        createdAt: matchedOwnerTenant.createdAt || nowIso,
+      };
+    }
+  }
+
+  // Fallback 2 : utilisateur existant dans la table public.users de Supabase
+  if (!foundUser && !isMainSuperAdmin && normalizedEmail.includes('@')) {
     const dbUsers = await getAllUsers().catch(() => []);
     const matchedDbUser = dbUsers.find(
       (u) => u.email.trim().toLowerCase() === normalizedEmail
@@ -730,7 +812,38 @@ export async function authenticateSaaSUserEntry(
     }
   }
 
-  // Fallback Super Admin principal
+  // Fallback 3 : compte créé directement dans Supabase Authentication (auth.users)
+  if (
+    !foundUser &&
+    !isMainSuperAdmin &&
+    normalizedEmail.includes('@') &&
+    typedPassword
+  ) {
+    const sbAuthUser = await verifySupabaseAuthPassword(
+      normalizedEmail,
+      typedPassword
+    );
+    if (sbAuthUser) {
+      const defaultAgency =
+        tenants.find((t) => t.isCurrentTenant && t.status === 'active') ||
+        tenants.find((t) => t.status === 'active') ||
+        tenants[0];
+      foundUser = {
+        id: `user_sb_${sbAuthUser.id}`,
+        fullName: sbAuthUser.fullName,
+        email: sbAuthUser.email,
+        password: typedPassword,
+        role: 'agent',
+        tenantId: defaultAgency?.id || 'tenant_gimmo_prestige',
+        tenantName:
+          defaultAgency?.companyName || 'GIMMO PRESTIGE IMMOBILIER SARL',
+        status: 'active',
+        createdAt: nowIso,
+      };
+    }
+  }
+
+  // Fallback 4 : Super Admin principal
   if (!foundUser && isMainSuperAdmin) {
     const chosenAgency =
       tenants.find((t) => t.isCurrentTenant) || tenants[0];
@@ -753,12 +866,15 @@ export async function authenticateSaaSUserEntry(
       status: 404,
       code: 'USER_NOT_FOUND',
       error:
-        'Aucun compte trouvé pour cette adresse email. Seul l’Administrateur ou le Directeur de l’Agence peut créer les comptes des autres utilisateurs et leur affecter un rôle. Pour enregistrer une nouvelle agence immobilière, utilisez l’onglet « Créer une agence ».',
+        'Aucun compte trouvé pour cet identifiant. Seul l’Administrateur ou le Directeur de l’Agence peut créer les comptes des autres utilisateurs et leur affecter un rôle. Pour enregistrer une nouvelle agence immobilière, utilisez l’onglet « Créer une agence ».',
     };
   }
 
+  const effectiveEmail = foundUser.email.trim().toLowerCase();
   const isSuperAdmin =
-    isMainSuperAdmin || foundUser.role === 'super_admin';
+    isMainSuperAdmin ||
+    effectiveEmail === 'assamoighislain@gmail.com' ||
+    foundUser.role === 'super_admin';
 
   if (!isSuperAdmin && foundUser.status === 'suspended') {
     return {
@@ -770,7 +886,7 @@ export async function authenticateSaaSUserEntry(
     };
   }
 
-  const storedPassword = (foundUser.password || '').trim();
+  const storedPassword = stripInvisible(foundUser.password || '');
   if (storedPassword) {
     if (!typedPassword) {
       return {
@@ -833,7 +949,7 @@ export async function authenticateSaaSUserEntry(
   const existingUserIdx = users.findIndex(
     (u) =>
       u.id === authenticatedUser.id ||
-      u.email.trim().toLowerCase() === normalizedEmail
+      u.email.trim().toLowerCase() === effectiveEmail
   );
 
   const updatedUsers =

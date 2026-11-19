@@ -532,15 +532,16 @@ async function startServer() {
           error: result.error,
         });
       }
-      await broadcastRealtimeState(
-        `Connexion utilisateur : ${result.user?.email || email}`
-      );
-      return res.json({
+      res.json({
         ok: true,
         user: result.user,
         agency: result.agency,
         templates: result.templates,
       });
+      void broadcastRealtimeState(
+        `Connexion utilisateur : ${result.user?.email || email}`
+      );
+      return;
     } catch (error: any) {
       console.error('SaaS login error:', error);
       return res.status(500).json({

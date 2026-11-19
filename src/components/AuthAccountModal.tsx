@@ -29,7 +29,11 @@ import {
   resolveSaaSTenants,
   resolveSaaSUsers,
 } from '../lib/document-templates.ts';
-import { executeMutation } from '../lib/offline-manager.ts';
+import {
+  executeMutation,
+  getOfflineQueue,
+  clearOfflineQueue,
+} from '../lib/offline-manager.ts';
 import {
   playAgencyCreatedSound,
   buildAgencyCreatedWhatsAppDetails,
@@ -186,10 +190,14 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
     setErrorMsg(null);
     setApprovalPendingNotice(null);
 
-    const normalizedEmail = loginEmail.trim().toLowerCase();
-    const typedPassword = loginPassword.trim();
+    const cleanInput = (v: string) =>
+      v.replace(/[\u200B-\u200D\uFEFF\u00A0]/g, ' ').trim();
+
+    const rawIdentifier = cleanInput(loginEmail);
+    const normalizedEmail = rawIdentifier.toLowerCase();
+    const typedPassword = cleanInput(loginPassword);
     if (!normalizedEmail) {
-      setErrorMsg('Veuillez saisir votre adresse email professionnelle.');
+      setErrorMsg('Veuillez saisir votre adresse email professionnelle ou votre numéro WhatsApp.');
       return;
     }
 
@@ -197,12 +205,29 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
     try {
       // 1. Authentification directe côté serveur (lecture fraîche dans Supabase)
       if (typeof navigator === 'undefined' || navigator.onLine) {
+        // Si des créations (agence/utilisateur) étaient en file d'attente locale, les pousser d'abord vers Supabase
+        const queued = getOfflineQueue();
+        if (queued.length > 0) {
+          try {
+            const syncRes = await fetch('/api/gimmo/sync-batch', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ mutations: queued }),
+            });
+            if (syncRes.ok) {
+              clearOfflineQueue();
+            }
+          } catch {
+            // Poursuit la tentative de connexion même si le sync échoue
+          }
+        }
+
         try {
           const response = await fetch('/api/saas/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              email: normalizedEmail,
+              email: rawIdentifier,
               password: typedPassword,
             }),
           });
@@ -229,6 +254,26 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
                   'Votre agence immobilière est actuellement en attente d’approbation par le Super Admin (assamoighislain@gmail.com).'
               );
               return;
+            }
+
+            // Si un propriétaire bailleur saisit ses accès WhatsApp sur l'onglet principal, ouvrir directement son Portail Bailleur
+            if (
+              payload.code === 'USER_NOT_FOUND' &&
+              typedPassword &&
+              onLandlordPortalLoginSuccess
+            ) {
+              try {
+                const landlordSession =
+                  await authenticateOrRefreshLandlordPortalClient({
+                    identifier: rawIdentifier,
+                    password: typedPassword,
+                  });
+                onLandlordPortalLoginSuccess(landlordSession, typedPassword);
+                onClose?.();
+                return;
+              } catch {
+                // Pas un compte bailleur valide : afficher le message principal
+              }
             }
 
             setErrorMsg(
@@ -735,21 +780,23 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
 
         {tab === 'login' ? (
           <div className="space-y-5">
-            {/* Connexion par Email & Mot de passe */}
-            <form onSubmit={handleEmailLoginSubmit} className="space-y-4">
+            {/* Connexion par Email ou WhatsApp & Mot de passe */}
+            <form noValidate onSubmit={handleEmailLoginSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Adresse Email Professionnelle *
+                  Email Professionnel ou Téléphone WhatsApp *
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
                     ref={emailInputRef}
-                    type="email"
+                    type="text"
+                    inputMode="email"
+                    autoComplete="username"
                     required
                     value={loginEmail}
                     onChange={(e) => setLoginEmail(e.target.value)}
-                    placeholder="votre.email@agence.ci"
+                    placeholder="votre.email@agence.ci ou +225 07..."
                     className="w-full pl-9 pr-3 py-2.5 text-sm bg-white border border-slate-300 rounded-md focus:outline-none focus:border-indigo-600 text-slate-900"
                   />
                 </div>

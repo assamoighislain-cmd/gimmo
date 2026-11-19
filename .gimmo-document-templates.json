@@ -127,7 +127,7 @@
     "website": "www.gimmo-prestige.ci",
     "bankInfo": "SGBCI CI008 01111 012345678901 88 · Orange Money Marchand : #144*821#",
     "headerSlogan": "Société de Gérance Locative, Syndic de Copropriété & Administration de Patrimoine Immobilier",
-    "updatedAt": "2026-11-19T13:21:36.613Z"
+    "updatedAt": "2026-11-19T14:14:30.036Z"
   },
   "saasTenants": [
     {
@@ -164,8 +164,8 @@
       "tenantId": "tenant_gimmo_prestige",
       "createdAt": "2026-01-01T00:00:00.000Z",
       "tenantName": "GIMMO PRESTIGE IMMOBILIER SARL",
-      "lastLoginAt": "2026-11-19T13:21:36.613Z"
+      "lastLoginAt": "2026-11-19T14:14:30.036Z"
     }
   ],
-  "updatedAt": "2026-11-19T13:21:36.613Z"
+  "updatedAt": "2026-11-19T14:14:30.036Z"
 }

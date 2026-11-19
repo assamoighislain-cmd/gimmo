@@ -69,6 +69,43 @@ export function requireSupabaseAdmin(): SupabaseClient {
   return client;
 }
 
+export async function verifySupabaseAuthPassword(
+  email: string,
+  password: string
+): Promise<{ id: string; email: string; fullName: string } | null> {
+  const { url, publishableKey, secretKey } = getSupabaseConfig();
+  const apiKey = publishableKey || secretKey;
+  if (!url || !apiKey || !email || !password) {
+    return null;
+  }
+  try {
+    const authClient = createClient(url, apiKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
+    const { data, error } = await authClient.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (error || !data?.user) {
+      return null;
+    }
+    const meta = (data.user.user_metadata || {}) as Record<string, any>;
+    const fullName =
+      String(meta.full_name || meta.name || '').trim() ||
+      email.split('@')[0];
+    return {
+      id: data.user.id,
+      email: (data.user.email || email).trim().toLowerCase(),
+      fullName,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function mapLandlordRow(row: any): Landlord {
   return {
     id: Number(row.id),
