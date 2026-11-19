@@ -1,645 +1,190 @@
-import { db } from './index.ts';
 import {
-  landlords,
-  properties,
-  tenants,
-  leases,
-  payments,
-} from './schema.ts';
-import { eq, desc, inArray } from 'drizzle-orm';
+  requireSupabaseAdmin,
+  mapLandlordRow,
+  mapPropertyRow,
+  mapTenantRow,
+  mapLeaseRow,
+  mapPaymentRow,
+} from './supabase.ts';
 import {
   deriveDefaultLandlordUsername,
   generateLandlordPortalPassword,
 } from '../lib/landlord-portal.ts';
 
-/**
- * Initialise des données de démonstration réalistes (Multi-Bailleurs, Biens géolocalisés PostGIS,
- * Locataires, Contrats de bail et Quittances/Impayés) si la base est vide.
- */
-export async function ensureInitialData(userId: string = 'global_demo') {
-  try {
-    const existingLandlords = await db.select().from(landlords);
-    if (existingLandlords.length > 0) {
-      return;
-    }
-
-    // 1. Création de 3 Bailleurs (Multi-Bailleurs)
-    const insertedLandlords = await db
-      .insert(landlords)
-      .values([
-        {
-          userId,
-          fullName: 'Kouassi Jean-Marc',
-          companyName: 'SCI Lagune Patrimoine',
-          email: 'jmkouassi@lagune-patrimoine.ci',
-          phone: '+2250707112233',
-          address: 'Boulevard Latrille, Cocody Deux-Plateaux, Abidjan',
-          taxId: 'CI-ABJ-2021-B-14920',
-          iban: 'CI93 CI00 8011 1200 4928 1900 44',
-          commissionRate: 8.0,
-          contractHeaderNote:
-            'Bail régi par les dispositions du Code Civil et de la réglementation sur les baux à usage d’habitation en République de Côte d’Ivoire. Pénalité de retard fixée à 5% après le 10 du mois.',
-        },
-        {
-          userId,
-          fullName: 'Konan Marie-Claire',
-          companyName: 'Groupe Immobilier Éburnie',
-          email: 'direction@eburnie-immo.ci',
-          phone: '+2250505445566',
-          address: 'Zone 4C, Rue du Docteur Blanchard, Marcory, Abidjan',
-          taxId: 'CI-ABJ-2019-B-08312',
-          iban: 'CI93 CI00 2010 9900 1837 2210 88',
-          commissionRate: 10.0,
-          contractHeaderNote:
-            'Contrat soumis à obligation d’assurance multirisque habitation par le Preneur dès la remise des clés. Entretien de la climatisation à la charge du Locataire.',
-        },
-        {
-          userId,
-          fullName: 'Bamba Souleymane',
-          companyName: 'S.B. Investissements Fonciers',
-          email: 'sbamba@sbinvest.ci',
-          phone: '+2250102334455',
-          address: 'Avenue Chardy, Le Plateau, Abidjan',
-          taxId: 'CI-ABJ-2023-A-55109',
-          iban: 'CI93 CI04 5010 0039 4817 2000 11',
-          commissionRate: 7.5,
-          contractHeaderNote:
-            'Bail commercial et professionnel avec révision triennale encadrée. Quittance émise exclusivement après encaissement effectif.',
-        },
-      ])
-      .returning();
-
-    const [landlord1, landlord2, landlord3] = insertedLandlords;
-
-    // 2. Création des Biens Immobiliers Géolocalisés (PostGIS WKT + GPS)
-    const insertedProperties = await db
-      .insert(properties)
-      .values([
-        {
-          userId,
-          landlordId: landlord1.id,
-          reference: 'GIM-COC-001',
-          title: 'Résidence Les Orchidées - Appt A4',
-          propertyType: 'Appartement',
-          address: 'Rue des Jardins, Vallon',
-          city: 'Abidjan',
-          neighborhood: 'Cocody Deux-Plateaux',
-          surfaceArea: 145,
-          roomsCount: 4,
-          monthlyRent: '650000',
-          chargesAmount: '45000',
-          currency: 'FCFA',
-          latitude: 5.359952,
-          longitude: -3.987612,
-          postgisWkt: 'SRID=4326;POINT(-3.987612 5.359952)',
-          status: 'occupied',
-        },
-        {
-          userId,
-          landlordId: landlord1.id,
-          reference: 'GIM-RIV-002',
-          title: 'Villa Duplex Riviera Golf 4',
-          propertyType: 'Villa',
-          address: 'Boulevard de France, Beverly Hills',
-          city: 'Abidjan',
-          neighborhood: 'Cocody Riviera Golf',
-          surfaceArea: 320,
-          roomsCount: 6,
-          monthlyRent: '1400000',
-          chargesAmount: '80000',
-          currency: 'FCFA',
-          latitude: 5.341289,
-          longitude: -3.96341,
-          postgisWkt: 'SRID=4326;POINT(-3.963410 5.341289)',
-          status: 'occupied',
-        },
-        {
-          userId,
-          landlordId: landlord2.id,
-          reference: 'GIM-Z4C-003',
-          title: 'Loft Panoramique Le Calao',
-          propertyType: 'Appartement',
-          address: 'Rue Pierre et Marie Curie, Zone 4C',
-          city: 'Abidjan',
-          neighborhood: 'Marcory Zone 4',
-          surfaceArea: 118,
-          roomsCount: 3,
-          monthlyRent: '550000',
-          chargesAmount: '35000',
-          currency: 'FCFA',
-          latitude: 5.291845,
-          longitude: -3.979104,
-          postgisWkt: 'SRID=4326;POINT(-3.979104 5.291845)',
-          status: 'occupied',
-        },
-        {
-          userId,
-          landlordId: landlord2.id,
-          reference: 'GIM-BIA-004',
-          title: 'Showroom Commercial Biétry',
-          propertyType: 'Local Commercial',
-          address: 'Boulevard de Marseille, Biétry',
-          city: 'Abidjan',
-          neighborhood: 'Marcory Biétry',
-          surfaceArea: 210,
-          roomsCount: 5,
-          monthlyRent: '950000',
-          chargesAmount: '50000',
-          currency: 'FCFA',
-          latitude: 5.280412,
-          longitude: -3.98952,
-          postgisWkt: 'SRID=4326;POINT(-3.989520 5.280412)',
-          status: 'occupied',
-        },
-        {
-          userId,
-          landlordId: landlord3.id,
-          reference: 'GIM-PLT-005',
-          title: 'Plateau Tour Harmonie - 8e Étage',
-          propertyType: 'Bureau',
-          address: 'Avenue Abdoulaye Fadiga, Le Plateau',
-          city: 'Abidjan',
-          neighborhood: 'Plateau Centre',
-          surfaceArea: 185,
-          roomsCount: 6,
-          monthlyRent: '1150000',
-          chargesAmount: '75000',
-          currency: 'FCFA',
-          latitude: 5.323815,
-          longitude: -4.019842,
-          postgisWkt: 'SRID=4326;POINT(-4.019842 5.323815)',
-          status: 'occupied',
-        },
-        {
-          userId,
-          landlordId: landlord3.id,
-          reference: 'GIM-ANG-006',
-          title: 'Résidence Émeraude - Studio Haut Standing',
-          propertyType: 'Studio',
-          address: '8e Tranche, Carrefour Prière',
-          city: 'Abidjan',
-          neighborhood: 'Cocody Angré',
-          surfaceArea: 52,
-          roomsCount: 2,
-          monthlyRent: '260000',
-          chargesAmount: '20000',
-          currency: 'FCFA',
-          latitude: 5.39412,
-          longitude: -3.97845,
-          postgisWkt: 'SRID=4326;POINT(-3.978450 5.394120)',
-          status: 'vacant',
-        },
-      ])
-      .returning();
-
-    // 3. Création des Locataires
-    const insertedTenants = await db
-      .insert(tenants)
-      .values([
-        {
-          userId,
-          firstName: 'Awa',
-          lastName: 'Touré',
-          email: 'awa.toure@corp-finance.ci',
-          phoneWhatsapp: '+2250708123456',
-          nationalIdNumber: 'CI0049281742',
-          profession: 'Directrice Financière',
-          employer: 'Banque Atlantique CI',
-          monthlyIncome: '2400000',
-          guarantorName: 'Touré Ibrahim',
-          guarantorPhone: '+2250707998877',
-          dossierStatus: 'approved',
-        },
-        {
-          userId,
-          firstName: 'Stéphane',
-          lastName: 'Aka',
-          email: 's.aka@logistique-port.ci',
-          phoneWhatsapp: '+2250504654321',
-          nationalIdNumber: 'CI0083910421',
-          profession: 'Ingénieur Logistique',
-          employer: 'Bolloré Africa Logistics',
-          monthlyIncome: '4200000',
-          guarantorName: 'Aka Henriette',
-          guarantorPhone: '+2250505112200',
-          dossierStatus: 'approved',
-        },
-        {
-          userId,
-          firstName: 'Cédric',
-          lastName: 'N’Guessan',
-          email: 'c.nguessan@studio-architecture.ci',
-          phoneWhatsapp: '+2250749302190',
-          nationalIdNumber: 'CI0019283746',
-          profession: 'Architecte DPLG',
-          employer: 'Cabinet N’Guessan & Associés',
-          monthlyIncome: '1950000',
-          guarantorName: 'N’Guessan Paul',
-          guarantorPhone: '+2250101887766',
-          dossierStatus: 'approved',
-        },
-        {
-          userId,
-          firstName: 'Fatou',
-          lastName: 'Diallo',
-          email: 'f.diallo@maison-deco.ci',
-          phoneWhatsapp: '+2250758102938',
-          nationalIdNumber: 'CI0065748392',
-          profession: 'Gérante de Société',
-          employer: 'Maison Déco SARL',
-          monthlyIncome: '3100000',
-          guarantorName: 'Diallo Amadou',
-          guarantorPhone: '+2250709443322',
-          dossierStatus: 'approved',
-        },
-        {
-          userId,
-          firstName: 'Olivier',
-          lastName: 'Koffi',
-          email: 'o.koffi@tech-afrique.io',
-          phoneWhatsapp: '+2250103948576',
-          nationalIdNumber: 'CI0091827364',
-          profession: 'Directeur Général',
-          employer: 'Tech Afrique Solutions',
-          monthlyIncome: '3800000',
-          guarantorName: 'Koffi Michel',
-          guarantorPhone: '+2250708556677',
-          dossierStatus: 'approved',
-        },
-      ])
-      .returning();
-
-    // 4. Création des Contrats de Bail
-    const insertedLeases = await db
-      .insert(leases)
-      .values([
-        {
-          userId,
-          contractNumber: 'BAIL-2026-0101',
-          landlordId: landlord1.id,
-          propertyId: insertedProperties[0].id,
-          tenantId: insertedTenants[0].id,
-          startDate: '2026-01-01',
-          endDate: '2027-12-31',
-          rentAmount: '650000',
-          chargesAmount: '45000',
-          securityDeposit: '1300000',
-          paymentDueDay: 5,
-          customClauses:
-            'Accès piscine et parking souterrain (2 places) inclus dans les charges locatives.',
-          status: 'active',
-          shareToken: 'tok-lease-2026-0101-a9f8',
-        },
-        {
-          userId,
-          contractNumber: 'BAIL-2026-0102',
-          landlordId: landlord1.id,
-          propertyId: insertedProperties[1].id,
-          tenantId: insertedTenants[1].id,
-          startDate: '2026-02-01',
-          endDate: '2028-01-31',
-          rentAmount: '1400000',
-          chargesAmount: '80000',
-          securityDeposit: '2800000',
-          paymentDueDay: 5,
-          customClauses:
-            'Entretien du jardin privatif et du groupe électrogène assuré par le syndic.',
-          status: 'active',
-          shareToken: 'tok-lease-2026-0102-b7c4',
-        },
-        {
-          userId,
-          contractNumber: 'BAIL-2026-0103',
-          landlordId: landlord2.id,
-          propertyId: insertedProperties[2].id,
-          tenantId: insertedTenants[2].id,
-          startDate: '2026-03-01',
-          endDate: '2027-02-28',
-          rentAmount: '550000',
-          chargesAmount: '35000',
-          securityDeposit: '1100000',
-          paymentDueDay: 5,
-          customClauses:
-            'Usage mixte habitation et bureau d’architecte autorisé sans accueil de public massif.',
-          status: 'active',
-          shareToken: 'tok-lease-2026-0103-c3d2',
-        },
-        {
-          userId,
-          contractNumber: 'BAIL-2026-0104',
-          landlordId: landlord2.id,
-          propertyId: insertedProperties[3].id,
-          tenantId: insertedTenants[3].id,
-          startDate: '2026-01-15',
-          endDate: '2029-01-14',
-          rentAmount: '950000',
-          chargesAmount: '50000',
-          securityDeposit: '1900000',
-          paymentDueDay: 5,
-          customClauses:
-            'Bail commercial avec autorisation d’enseigne lumineuse en façade sur le Boulevard de Marseille.',
-          status: 'active',
-          shareToken: 'tok-lease-2026-0104-d5e1',
-        },
-        {
-          userId,
-          contractNumber: 'BAIL-2026-0105',
-          landlordId: landlord3.id,
-          propertyId: insertedProperties[4].id,
-          tenantId: insertedTenants[4].id,
-          startDate: '2026-04-01',
-          endDate: '2029-03-31',
-          rentAmount: '1150000',
-          chargesAmount: '75000',
-          securityDeposit: '2300000',
-          paymentDueDay: 5,
-          customClauses:
-            'Fibre optique dédiée et sécurité 24h/24 incluses dans les charges d’immeuble.',
-          status: 'active',
-          shareToken: 'tok-lease-2026-0105-e8f9',
-        },
-      ])
-      .returning();
-
-    // 5. Création des Paiements & Quittances (Payés + Impayés / Retards pour le recouvrement)
-    await db.insert(payments).values([
-      {
-        userId,
-        receiptNumber: 'QUIT-202611-001',
-        leaseId: insertedLeases[0].id,
-        landlordId: landlord1.id,
-        propertyId: insertedProperties[0].id,
-        tenantId: insertedTenants[0].id,
-        periodMonth: '2026-11',
-        periodLabel: 'Novembre 2026',
-        amountDue: '695000',
-        amountPaid: '695000',
-        dueDate: '2026-11-05',
-        paymentDate: '2026-11-03',
-        paymentMethod: 'Virement',
-        status: 'paid',
-        daysLate: 0,
-        whatsappSent: true,
-        shareToken: 'tok-quit-202611-001-x91a',
-      },
-      {
-        userId,
-        receiptNumber: 'QUIT-202611-002',
-        leaseId: insertedLeases[1].id,
-        landlordId: landlord1.id,
-        propertyId: insertedProperties[1].id,
-        tenantId: insertedTenants[1].id,
-        periodMonth: '2026-11',
-        periodLabel: 'Novembre 2026',
-        amountDue: '1480000',
-        amountPaid: '0',
-        dueDate: '2026-11-05',
-        paymentDate: null,
-        paymentMethod: null,
-        status: 'overdue',
-        daysLate: 14,
-        whatsappSent: false,
-        shareToken: 'tok-quit-202611-002-y82b',
-      },
-      {
-        userId,
-        receiptNumber: 'QUIT-202611-003',
-        leaseId: insertedLeases[2].id,
-        landlordId: landlord2.id,
-        propertyId: insertedProperties[2].id,
-        tenantId: insertedTenants[2].id,
-        periodMonth: '2026-11',
-        periodLabel: 'Novembre 2026',
-        amountDue: '585000',
-        amountPaid: '585000',
-        dueDate: '2026-11-05',
-        paymentDate: '2026-11-04',
-        paymentMethod: 'Mobile Money',
-        status: 'paid',
-        daysLate: 0,
-        whatsappSent: true,
-        shareToken: 'tok-quit-202611-003-z73c',
-      },
-      {
-        userId,
-        receiptNumber: 'QUIT-202611-004',
-        leaseId: insertedLeases[3].id,
-        landlordId: landlord2.id,
-        propertyId: insertedProperties[3].id,
-        tenantId: insertedTenants[3].id,
-        periodMonth: '2026-11',
-        periodLabel: 'Novembre 2026',
-        amountDue: '1000000',
-        amountPaid: '400000',
-        dueDate: '2026-11-05',
-        paymentDate: '2026-11-06',
-        paymentMethod: 'Chèque',
-        status: 'overdue',
-        daysLate: 9,
-        whatsappSent: false,
-        shareToken: 'tok-quit-202611-004-w64d',
-      },
-      {
-        userId,
-        receiptNumber: 'QUIT-202611-005',
-        leaseId: insertedLeases[4].id,
-        landlordId: landlord3.id,
-        propertyId: insertedProperties[4].id,
-        tenantId: insertedTenants[4].id,
-        periodMonth: '2026-11',
-        periodLabel: 'Novembre 2026',
-        amountDue: '1225000',
-        amountPaid: '1225000',
-        dueDate: '2026-11-05',
-        paymentDate: '2026-11-09',
-        paymentMethod: 'Virement',
-        status: 'paid',
-        daysLate: 0,
-        whatsappSent: false,
-        shareToken: 'tok-quit-202611-005-v55e',
-      },
-      // Historique Octobre 2026 pour rapports mensuels/annuels
-      {
-        userId,
-        receiptNumber: 'QUIT-202610-001',
-        leaseId: insertedLeases[0].id,
-        landlordId: landlord1.id,
-        propertyId: insertedProperties[0].id,
-        tenantId: insertedTenants[0].id,
-        periodMonth: '2026-10',
-        periodLabel: 'Octobre 2026',
-        amountDue: '695000',
-        amountPaid: '695000',
-        dueDate: '2026-10-05',
-        paymentDate: '2026-10-04',
-        paymentMethod: 'Virement',
-        status: 'paid',
-        daysLate: 0,
-        whatsappSent: true,
-        shareToken: 'tok-quit-202610-001-u44f',
-      },
-      {
-        userId,
-        receiptNumber: 'QUIT-202610-002',
-        leaseId: insertedLeases[1].id,
-        landlordId: landlord1.id,
-        propertyId: insertedProperties[1].id,
-        tenantId: insertedTenants[1].id,
-        periodMonth: '2026-10',
-        periodLabel: 'Octobre 2026',
-        amountDue: '1480000',
-        amountPaid: '1480000',
-        dueDate: '2026-10-05',
-        paymentDate: '2026-10-05',
-        paymentMethod: 'Virement',
-        status: 'paid',
-        daysLate: 0,
-        whatsappSent: true,
-        shareToken: 'tok-quit-202610-002-t33g',
-      },
-    ]);
-  } catch (error) {
-    console.error('Database query failed in ensureInitialData:', error);
-    throw new Error('Impossible d’initialiser les données de démonstration.', { cause: error });
-  }
+export async function ensureInitialData(_userId: string = 'global_demo') {
+  // Base Supabase laissée propre sans injection forcée de données fictives
+  return;
 }
 
 export async function getAllDashboardData() {
   try {
-    const [allLandlords, allProperties, allTenants, allLeases, allPayments] =
+    const sb = requireSupabaseAdmin();
+    const [landlordsRes, propertiesRes, tenantsRes, leasesRes, paymentsRes] =
       await Promise.all([
-        db.select().from(landlords).orderBy(desc(landlords.id)),
-        db.select().from(properties).orderBy(desc(properties.id)),
-        db.select().from(tenants).orderBy(desc(tenants.id)),
-        db.select().from(leases).orderBy(desc(leases.id)),
-        db.select().from(payments).orderBy(desc(payments.id)),
+        sb.from('landlords').select('*').order('id', { ascending: false }),
+        sb.from('properties').select('*').order('id', { ascending: false }),
+        sb.from('tenants').select('*').order('id', { ascending: false }),
+        sb.from('leases').select('*').order('id', { ascending: false }),
+        sb.from('payments').select('*').order('id', { ascending: false }),
       ]);
 
+    if (landlordsRes.error) throw landlordsRes.error;
+    if (propertiesRes.error) throw propertiesRes.error;
+    if (tenantsRes.error) throw tenantsRes.error;
+    if (leasesRes.error) throw leasesRes.error;
+    if (paymentsRes.error) throw paymentsRes.error;
+
     return {
-      landlords: allLandlords,
-      properties: allProperties,
-      tenants: allTenants,
-      leases: allLeases,
-      payments: allPayments,
+      landlords: (landlordsRes.data || []).map(mapLandlordRow),
+      properties: (propertiesRes.data || []).map(mapPropertyRow),
+      tenants: (tenantsRes.data || []).map(mapTenantRow),
+      leases: (leasesRes.data || []).map(mapLeaseRow),
+      payments: (paymentsRes.data || []).map(mapPaymentRow),
     };
   } catch (error) {
-    console.error('Database query failed in getAllDashboardData:', error);
-    throw new Error('Failed to fetch Gimmo data from PostgreSQL.', { cause: error });
+    console.error('Supabase query failed in getAllDashboardData:', error);
+    throw new Error('Failed to fetch Gimmo data from Supabase.', {
+      cause: error,
+    });
   }
 }
 
 export async function getPaymentFullDetailsByToken(shareToken: string) {
   try {
-    const paymentRows = await db
-      .select()
-      .from(payments)
-      .where(eq(payments.shareToken, shareToken));
+    const sb = requireSupabaseAdmin();
+    const { data: paymentRow, error } = await sb
+      .from('payments')
+      .select('*')
+      .eq('share_token', shareToken)
+      .maybeSingle();
+    if (error) throw error;
+    if (!paymentRow) return null;
 
-    if (!paymentRows.length) return null;
-    const payment = paymentRows[0];
-
-    const [landlordRows, propertyRows, tenantRows, leaseRows] = await Promise.all([
-      db.select().from(landlords).where(eq(landlords.id, payment.landlordId)),
-      db.select().from(properties).where(eq(properties.id, payment.propertyId)),
-      db.select().from(tenants).where(eq(tenants.id, payment.tenantId)),
-      db.select().from(leases).where(eq(leases.id, payment.leaseId)),
+    const payment = mapPaymentRow(paymentRow);
+    const [landlordRes, propertyRes, tenantRes, leaseRes] = await Promise.all([
+      sb.from('landlords').select('*').eq('id', payment.landlordId).maybeSingle(),
+      sb.from('properties').select('*').eq('id', payment.propertyId).maybeSingle(),
+      sb.from('tenants').select('*').eq('id', payment.tenantId).maybeSingle(),
+      sb.from('leases').select('*').eq('id', payment.leaseId).maybeSingle(),
     ]);
+
+    if (!landlordRes.data || !propertyRes.data || !tenantRes.data || !leaseRes.data) {
+      return null;
+    }
 
     return {
       payment,
-      landlord: landlordRows[0],
-      property: propertyRows[0],
-      tenant: tenantRows[0],
-      lease: leaseRows[0],
+      landlord: mapLandlordRow(landlordRes.data),
+      property: mapPropertyRow(propertyRes.data),
+      tenant: mapTenantRow(tenantRes.data),
+      lease: mapLeaseRow(leaseRes.data),
     };
   } catch (error) {
-    console.error('Database query failed in getPaymentFullDetailsByToken:', error);
+    console.error('Supabase query failed in getPaymentFullDetailsByToken:', error);
     throw new Error('Failed to load receipt details.', { cause: error });
   }
 }
 
 export async function getPaymentFullDetailsById(paymentId: number) {
   try {
-    const paymentRows = await db
-      .select()
-      .from(payments)
-      .where(eq(payments.id, paymentId));
+    const sb = requireSupabaseAdmin();
+    const { data: paymentRow, error } = await sb
+      .from('payments')
+      .select('*')
+      .eq('id', paymentId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!paymentRow) return null;
 
-    if (!paymentRows.length) return null;
-    const payment = paymentRows[0];
-
-    const [landlordRows, propertyRows, tenantRows, leaseRows] = await Promise.all([
-      db.select().from(landlords).where(eq(landlords.id, payment.landlordId)),
-      db.select().from(properties).where(eq(properties.id, payment.propertyId)),
-      db.select().from(tenants).where(eq(tenants.id, payment.tenantId)),
-      db.select().from(leases).where(eq(leases.id, payment.leaseId)),
+    const payment = mapPaymentRow(paymentRow);
+    const [landlordRes, propertyRes, tenantRes, leaseRes] = await Promise.all([
+      sb.from('landlords').select('*').eq('id', payment.landlordId).maybeSingle(),
+      sb.from('properties').select('*').eq('id', payment.propertyId).maybeSingle(),
+      sb.from('tenants').select('*').eq('id', payment.tenantId).maybeSingle(),
+      sb.from('leases').select('*').eq('id', payment.leaseId).maybeSingle(),
     ]);
+
+    if (!landlordRes.data || !propertyRes.data || !tenantRes.data || !leaseRes.data) {
+      return null;
+    }
 
     return {
       payment,
-      landlord: landlordRows[0],
-      property: propertyRows[0],
-      tenant: tenantRows[0],
-      lease: leaseRows[0],
+      landlord: mapLandlordRow(landlordRes.data),
+      property: mapPropertyRow(propertyRes.data),
+      tenant: mapTenantRow(tenantRes.data),
+      lease: mapLeaseRow(leaseRes.data),
     };
   } catch (error) {
-    console.error('Database query failed in getPaymentFullDetailsById:', error);
+    console.error('Supabase query failed in getPaymentFullDetailsById:', error);
     throw new Error('Failed to load payment details.', { cause: error });
   }
 }
 
 export async function getLeaseFullDetailsByToken(shareToken: string) {
   try {
-    const leaseRows = await db
-      .select()
-      .from(leases)
-      .where(eq(leases.shareToken, shareToken));
+    const sb = requireSupabaseAdmin();
+    const { data: leaseRow, error } = await sb
+      .from('leases')
+      .select('*')
+      .eq('share_token', shareToken)
+      .maybeSingle();
+    if (error) throw error;
+    if (!leaseRow) return null;
 
-    if (!leaseRows.length) return null;
-    const lease = leaseRows[0];
-
-    const [landlordRows, propertyRows, tenantRows] = await Promise.all([
-      db.select().from(landlords).where(eq(landlords.id, lease.landlordId)),
-      db.select().from(properties).where(eq(properties.id, lease.propertyId)),
-      db.select().from(tenants).where(eq(tenants.id, lease.tenantId)),
+    const lease = mapLeaseRow(leaseRow);
+    const [landlordRes, propertyRes, tenantRes] = await Promise.all([
+      sb.from('landlords').select('*').eq('id', lease.landlordId).maybeSingle(),
+      sb.from('properties').select('*').eq('id', lease.propertyId).maybeSingle(),
+      sb.from('tenants').select('*').eq('id', lease.tenantId).maybeSingle(),
     ]);
+
+    if (!landlordRes.data || !propertyRes.data || !tenantRes.data) {
+      return null;
+    }
 
     return {
       lease,
-      landlord: landlordRows[0],
-      property: propertyRows[0],
-      tenant: tenantRows[0],
+      landlord: mapLandlordRow(landlordRes.data),
+      property: mapPropertyRow(propertyRes.data),
+      tenant: mapTenantRow(tenantRes.data),
     };
   } catch (error) {
-    console.error('Database query failed in getLeaseFullDetailsByToken:', error);
+    console.error('Supabase query failed in getLeaseFullDetailsByToken:', error);
     throw new Error('Failed to load lease contract details.', { cause: error });
   }
 }
 
 export async function getLeaseFullDetailsById(leaseId: number) {
   try {
-    const leaseRows = await db
-      .select()
-      .from(leases)
-      .where(eq(leases.id, leaseId));
+    const sb = requireSupabaseAdmin();
+    const { data: leaseRow, error } = await sb
+      .from('leases')
+      .select('*')
+      .eq('id', leaseId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!leaseRow) return null;
 
-    if (!leaseRows.length) return null;
-    const lease = leaseRows[0];
-
-    const [landlordRows, propertyRows, tenantRows] = await Promise.all([
-      db.select().from(landlords).where(eq(landlords.id, lease.landlordId)),
-      db.select().from(properties).where(eq(properties.id, lease.propertyId)),
-      db.select().from(tenants).where(eq(tenants.id, lease.tenantId)),
+    const lease = mapLeaseRow(leaseRow);
+    const [landlordRes, propertyRes, tenantRes] = await Promise.all([
+      sb.from('landlords').select('*').eq('id', lease.landlordId).maybeSingle(),
+      sb.from('properties').select('*').eq('id', lease.propertyId).maybeSingle(),
+      sb.from('tenants').select('*').eq('id', lease.tenantId).maybeSingle(),
     ]);
+
+    if (!landlordRes.data || !propertyRes.data || !tenantRes.data) {
+      return null;
+    }
 
     return {
       lease,
-      landlord: landlordRows[0],
-      property: propertyRows[0],
-      tenant: tenantRows[0],
+      landlord: mapLandlordRow(landlordRes.data),
+      property: mapPropertyRow(propertyRes.data),
+      tenant: mapTenantRow(tenantRes.data),
     };
   } catch (error) {
-    console.error('Database query failed in getLeaseFullDetailsById:', error);
+    console.error('Supabase query failed in getLeaseFullDetailsById:', error);
     throw new Error('Failed to load lease details.', { cause: error });
   }
 }
@@ -649,45 +194,52 @@ export async function markPaymentAsPaid(
   paymentMethod: string = 'Mobile Money'
 ) {
   try {
-    const existing = await db
-      .select()
-      .from(payments)
-      .where(eq(payments.id, paymentId));
-
-    if (!existing.length) {
+    const sb = requireSupabaseAdmin();
+    const { data: existing, error: fetchErr } = await sb
+      .from('payments')
+      .select('*')
+      .eq('id', paymentId)
+      .maybeSingle();
+    if (fetchErr) throw fetchErr;
+    if (!existing) {
       throw new Error('Payment record not found');
     }
 
     const today = new Date().toISOString().split('T')[0];
-    const updated = await db
-      .update(payments)
-      .set({
-        amountPaid: existing[0].amountDue,
-        paymentDate: today,
-        paymentMethod,
+    const { data: updated, error: updateErr } = await sb
+      .from('payments')
+      .update({
+        amount_paid: existing.amount_due,
+        payment_date: today,
+        payment_method: paymentMethod,
         status: 'paid',
-        daysLate: 0,
+        days_late: 0,
       })
-      .where(eq(payments.id, paymentId))
-      .returning();
+      .eq('id', paymentId)
+      .select('*')
+      .single();
+    if (updateErr) throw updateErr;
 
-    return updated[0];
+    return mapPaymentRow(updated);
   } catch (error) {
-    console.error('Database query failed in markPaymentAsPaid:', error);
+    console.error('Supabase query failed in markPaymentAsPaid:', error);
     throw new Error('Failed to record payment.', { cause: error });
   }
 }
 
 export async function markWhatsappSent(paymentId: number) {
   try {
-    const updated = await db
-      .update(payments)
-      .set({ whatsappSent: true })
-      .where(eq(payments.id, paymentId))
-      .returning();
-    return updated[0];
+    const sb = requireSupabaseAdmin();
+    const { data: updated, error } = await sb
+      .from('payments')
+      .update({ whatsapp_sent: true })
+      .eq('id', paymentId)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return mapPaymentRow(updated);
   } catch (error) {
-    console.error('Database query failed in markWhatsappSent:', error);
+    console.error('Supabase query failed in markWhatsappSent:', error);
     throw new Error('Failed to update WhatsApp status.', { cause: error });
   }
 }
@@ -710,18 +262,35 @@ export async function createPropertyRecord(data: {
   status: string;
 }) {
   try {
+    const sb = requireSupabaseAdmin();
     const postgisWkt = `SRID=4326;POINT(${data.longitude} ${data.latitude})`;
-    const inserted = await db
-      .insert(properties)
-      .values({
-        ...data,
+    const { data: inserted, error } = await sb
+      .from('properties')
+      .insert({
+        user_id: data.userId,
+        landlord_id: data.landlordId,
+        reference: data.reference,
+        title: data.title,
+        property_type: data.propertyType,
+        address: data.address,
+        city: data.city,
+        neighborhood: data.neighborhood,
+        surface_area: Number(data.surfaceArea),
+        rooms_count: Number(data.roomsCount),
+        monthly_rent: Number(data.monthlyRent),
+        charges_amount: Number(data.chargesAmount || 0),
         currency: 'FCFA',
-        postgisWkt,
+        latitude: Number(data.latitude),
+        longitude: Number(data.longitude),
+        postgis_wkt: postgisWkt,
+        status: data.status || 'vacant',
       })
-      .returning();
-    return inserted[0];
+      .select('*')
+      .single();
+    if (error) throw error;
+    return mapPropertyRow(inserted);
   } catch (error) {
-    console.error('Database query failed in createPropertyRecord:', error);
+    console.error('Supabase query failed in createPropertyRecord:', error);
     throw new Error('Failed to create property.', { cause: error });
   }
 }
@@ -742,6 +311,7 @@ export async function createLandlordRecord(data: {
   portalEnabled?: boolean;
 }) {
   try {
+    const sb = requireSupabaseAdmin();
     const portalUsername =
       (data.portalUsername || '').trim() ||
       deriveDefaultLandlordUsername({
@@ -753,27 +323,29 @@ export async function createLandlordRecord(data: {
       (data.portalPassword || '').trim() || generateLandlordPortalPassword();
     const portalEnabled = data.portalEnabled !== false;
 
-    const inserted = await db
-      .insert(landlords)
-      .values({
-        userId: data.userId,
-        fullName: data.fullName,
-        companyName: data.companyName || null,
+    const { data: inserted, error } = await sb
+      .from('landlords')
+      .insert({
+        user_id: data.userId,
+        full_name: data.fullName,
+        company_name: data.companyName || null,
         email: data.email,
         phone: data.phone,
         address: data.address,
-        taxId: data.taxId || null,
+        tax_id: data.taxId || null,
         iban: data.iban || null,
-        commissionRate: data.commissionRate,
-        contractHeaderNote: data.contractHeaderNote || null,
-        portalUsername,
-        portalPassword,
-        portalEnabled,
+        commission_rate: Number(data.commissionRate ?? 8),
+        contract_header_note: data.contractHeaderNote || null,
+        portal_username: portalUsername,
+        portal_password: portalPassword,
+        portal_enabled: portalEnabled,
       })
-      .returning();
-    return inserted[0];
+      .select('*')
+      .single();
+    if (error) throw error;
+    return mapLandlordRow(inserted);
   } catch (error) {
-    console.error('Database query failed in createLandlordRecord:', error);
+    console.error('Supabase query failed in createLandlordRecord:', error);
     throw new Error('Failed to create landlord.', { cause: error });
   }
 }
@@ -793,89 +365,96 @@ export async function createTenantAndLeaseRecord(data: {
   customClauses?: string;
 }) {
   try {
-    const propRows = await db
-      .select()
-      .from(properties)
-      .where(eq(properties.id, data.propertyId));
-    if (!propRows.length) throw new Error('Bien introuvable');
-    const property = propRows[0];
+    const sb = requireSupabaseAdmin();
+    const { data: propRow, error: propErr } = await sb
+      .from('properties')
+      .select('*')
+      .eq('id', data.propertyId)
+      .maybeSingle();
+    if (propErr) throw propErr;
+    if (!propRow) throw new Error('Bien introuvable');
+    const property = mapPropertyRow(propRow);
 
-    const insertedTenant = await db
-      .insert(tenants)
-      .values({
-        userId: data.userId,
-        firstName: data.firstName,
-        lastName: data.lastName,
+    const { data: insertedTenantRow, error: tenantErr } = await sb
+      .from('tenants')
+      .insert({
+        user_id: data.userId,
+        first_name: data.firstName,
+        last_name: data.lastName,
         email: data.email,
-        phoneWhatsapp: data.phoneWhatsapp,
-        nationalIdNumber: data.nationalIdNumber,
+        phone_whatsapp: data.phoneWhatsapp,
+        national_id_number: data.nationalIdNumber,
         profession: data.profession || 'Cadre',
-        monthlyIncome: data.monthlyIncome || '1500000',
-        dossierStatus: 'approved',
+        monthly_income: Number(data.monthlyIncome || 1500000),
+        dossier_status: 'approved',
       })
-      .returning();
+      .select('*')
+      .single();
+    if (tenantErr) throw tenantErr;
+    const tenant = mapTenantRow(insertedTenantRow);
 
-    const tenant = insertedTenant[0];
     const randSuffix = Math.floor(1000 + Math.random() * 9000);
     const contractNumber = `BAIL-2026-${randSuffix}`;
     const shareToken = `tok-lease-${Date.now()}-${randSuffix}`;
 
     const rentNum = Number(property.monthlyRent);
     const chargesNum = Number(property.chargesAmount);
-    const totalDue = String(rentNum + chargesNum);
+    const totalDue = rentNum + chargesNum;
 
-    const insertedLease = await db
-      .insert(leases)
-      .values({
-        userId: data.userId,
-        contractNumber,
-        landlordId: property.landlordId,
-        propertyId: property.id,
-        tenantId: tenant.id,
-        startDate: data.startDate,
-        endDate: data.endDate,
-        rentAmount: property.monthlyRent,
-        chargesAmount: property.chargesAmount,
-        securityDeposit: String(rentNum * 2),
-        paymentDueDay: 5,
-        customClauses:
+    const { data: insertedLeaseRow, error: leaseErr } = await sb
+      .from('leases')
+      .insert({
+        user_id: data.userId,
+        contract_number: contractNumber,
+        landlord_id: property.landlordId,
+        property_id: property.id,
+        tenant_id: tenant.id,
+        start_date: data.startDate,
+        end_date: data.endDate,
+        rent_amount: rentNum,
+        charges_amount: chargesNum,
+        security_deposit: rentNum * 2,
+        payment_due_day: 5,
+        custom_clauses:
           data.customClauses ||
           'Le preneur s’engage à régler le loyer au plus tard le 5 de chaque mois.',
         status: 'active',
-        shareToken,
+        share_token: shareToken,
       })
-      .returning();
+      .select('*')
+      .single();
+    if (leaseErr) throw leaseErr;
+    const lease = mapLeaseRow(insertedLeaseRow);
 
-    const lease = insertedLease[0];
+    await sb
+      .from('properties')
+      .update({ status: 'occupied' })
+      .eq('id', property.id);
 
-    await db
-      .update(properties)
-      .set({ status: 'occupied' })
-      .where(eq(properties.id, property.id));
-
-    await db.insert(payments).values({
-      userId: data.userId,
-      receiptNumber: `QUIT-202611-${randSuffix}`,
-      leaseId: lease.id,
-      landlordId: property.landlordId,
-      propertyId: property.id,
-      tenantId: tenant.id,
-      periodMonth: '2026-11',
-      periodLabel: 'Novembre 2026',
-      amountDue: totalDue,
-      amountPaid: totalDue,
-      dueDate: '2026-11-05',
-      paymentDate: new Date().toISOString().split('T')[0],
-      paymentMethod: 'Mobile Money',
+    const { error: payErr } = await sb.from('payments').insert({
+      user_id: data.userId,
+      receipt_number: `QUIT-202611-${randSuffix}`,
+      lease_id: lease.id,
+      landlord_id: property.landlordId,
+      property_id: property.id,
+      tenant_id: tenant.id,
+      period_month: '2026-11',
+      period_label: 'Novembre 2026',
+      amount_due: totalDue,
+      amount_paid: totalDue,
+      due_date: '2026-11-05',
+      payment_date: new Date().toISOString().split('T')[0],
+      payment_method: 'Mobile Money',
       status: 'paid',
-      daysLate: 0,
-      whatsappSent: false,
-      shareToken: `tok-quit-${Date.now()}-${randSuffix}`,
+      days_late: 0,
+      whatsapp_sent: false,
+      share_token: `tok-quit-${Date.now()}-${randSuffix}`,
     });
+    if (payErr) throw payErr;
 
     return { tenant, lease };
   } catch (error) {
-    console.error('Database query failed in createTenantAndLeaseRecord:', error);
+    console.error('Supabase query failed in createTenantAndLeaseRecord:', error);
     throw new Error('Failed to create tenant and lease.', { cause: error });
   }
 }
@@ -900,36 +479,41 @@ export async function updatePropertyRecord(
   }
 ) {
   try {
+    const sb = requireSupabaseAdmin();
     const postgisWkt = `SRID=4326;POINT(${data.longitude} ${data.latitude})`;
-    const updated = await db
-      .update(properties)
-      .set({
-        landlordId: data.landlordId,
+    const { data: updated, error } = await sb
+      .from('properties')
+      .update({
+        landlord_id: data.landlordId,
         reference: data.reference,
         title: data.title,
-        propertyType: data.propertyType,
+        property_type: data.propertyType,
         address: data.address,
         city: data.city,
         neighborhood: data.neighborhood,
-        surfaceArea: data.surfaceArea,
-        roomsCount: data.roomsCount,
-        monthlyRent: data.monthlyRent,
-        chargesAmount: data.chargesAmount,
-        latitude: data.latitude,
-        longitude: data.longitude,
-        postgisWkt,
+        surface_area: Number(data.surfaceArea),
+        rooms_count: Number(data.roomsCount),
+        monthly_rent: Number(data.monthlyRent),
+        charges_amount: Number(data.chargesAmount || 0),
+        latitude: Number(data.latitude),
+        longitude: Number(data.longitude),
+        postgis_wkt: postgisWkt,
         status: data.status,
       })
-      .where(eq(properties.id, propertyId))
-      .returning();
+      .eq('id', propertyId)
+      .select('*')
+      .maybeSingle();
 
-    if (!updated.length) {
+    if (error) throw error;
+    if (!updated) {
       throw new Error('Bien immobilier introuvable');
     }
-    return updated[0];
+    return mapPropertyRow(updated);
   } catch (error) {
-    console.error('Database query failed in updatePropertyRecord:', error);
-    throw new Error('Impossible de modifier le bien immobilier.', { cause: error });
+    console.error('Supabase query failed in updatePropertyRecord:', error);
+    throw new Error('Impossible de modifier le bien immobilier.', {
+      cause: error,
+    });
   }
 }
 
@@ -951,11 +535,15 @@ export async function updateLandlordRecord(
   }
 ) {
   try {
-    const currentRows = await db
-      .select()
-      .from(landlords)
-      .where(eq(landlords.id, landlordId));
-    if (!currentRows.length) {
+    const sb = requireSupabaseAdmin();
+    const { data: currentRow, error: findErr } = await sb
+      .from('landlords')
+      .select('*')
+      .eq('id', landlordId)
+      .maybeSingle();
+    if (findErr) throw findErr;
+
+    if (!currentRow) {
       if (data.fullName && data.fullName.trim()) {
         return await createLandlordRecord({
           userId: 'global_demo',
@@ -964,7 +552,7 @@ export async function updateLandlordRecord(
       }
       throw new Error('Bailleur introuvable');
     }
-    const existing = currentRows[0];
+    const existing = mapLandlordRow(currentRow);
 
     const resolvedUsername =
       data.portalUsername !== undefined && data.portalUsername.trim() !== ''
@@ -986,31 +574,30 @@ export async function updateLandlordRecord(
         ? Boolean(data.portalEnabled)
         : existing.portalEnabled ?? true;
 
-    const updated = await db
-      .update(landlords)
-      .set({
-        fullName: data.fullName,
-        companyName: data.companyName || null,
+    const { data: updated, error: updateErr } = await sb
+      .from('landlords')
+      .update({
+        full_name: data.fullName,
+        company_name: data.companyName || null,
         email: data.email,
         phone: data.phone,
         address: data.address,
-        taxId: data.taxId || null,
+        tax_id: data.taxId || null,
         iban: data.iban || null,
-        commissionRate: data.commissionRate,
-        contractHeaderNote: data.contractHeaderNote || null,
-        portalUsername: resolvedUsername,
-        portalPassword: resolvedPassword,
-        portalEnabled: resolvedEnabled,
+        commission_rate: Number(data.commissionRate ?? 8),
+        contract_header_note: data.contractHeaderNote || null,
+        portal_username: resolvedUsername,
+        portal_password: resolvedPassword,
+        portal_enabled: resolvedEnabled,
       })
-      .where(eq(landlords.id, landlordId))
-      .returning();
+      .eq('id', landlordId)
+      .select('*')
+      .single();
 
-    if (!updated.length) {
-      throw new Error('Bailleur introuvable');
-    }
-    return updated[0];
+    if (updateErr) throw updateErr;
+    return mapLandlordRow(updated);
   } catch (error) {
-    console.error('Database query failed in updateLandlordRecord:', error);
+    console.error('Supabase query failed in updateLandlordRecord:', error);
     throw new Error('Impossible de modifier le bailleur.', { cause: error });
   }
 }
@@ -1039,56 +626,68 @@ export async function updateTenantAndLeaseRecord(
   }
 ) {
   try {
-    const leaseRows = await db
-      .select()
-      .from(leases)
-      .where(eq(leases.id, leaseId));
-    if (!leaseRows.length) throw new Error('Contrat de bail introuvable');
-    const currentLease = leaseRows[0];
+    const sb = requireSupabaseAdmin();
+    const { data: leaseRow, error: leaseFindErr } = await sb
+      .from('leases')
+      .select('*')
+      .eq('id', leaseId)
+      .maybeSingle();
+    if (leaseFindErr) throw leaseFindErr;
+    if (!leaseRow) throw new Error('Contrat de bail introuvable');
+    const currentLease = mapLeaseRow(leaseRow);
 
-    const propRows = await db
-      .select()
-      .from(properties)
-      .where(eq(properties.id, data.propertyId));
-    if (!propRows.length) throw new Error('Bien immobilier introuvable');
-    const property = propRows[0];
+    const { data: propRow, error: propFindErr } = await sb
+      .from('properties')
+      .select('*')
+      .eq('id', data.propertyId)
+      .maybeSingle();
+    if (propFindErr) throw propFindErr;
+    if (!propRow) throw new Error('Bien immobilier introuvable');
+    const property = mapPropertyRow(propRow);
 
-    const updatedTenant = await db
-      .update(tenants)
-      .set({
-        firstName: data.firstName,
-        lastName: data.lastName,
+    const { data: updatedTenant, error: tenantErr } = await sb
+      .from('tenants')
+      .update({
+        first_name: data.firstName,
+        last_name: data.lastName,
         email: data.email,
-        phoneWhatsapp: data.phoneWhatsapp,
-        nationalIdNumber: data.nationalIdNumber,
+        phone_whatsapp: data.phoneWhatsapp,
+        national_id_number: data.nationalIdNumber,
         profession: data.profession || null,
         employer: data.employer || null,
-        guarantorName: data.guarantorName || null,
-        guarantorPhone: data.guarantorPhone || null,
+        guarantor_name: data.guarantorName || null,
+        guarantor_phone: data.guarantorPhone || null,
       })
-      .where(eq(tenants.id, currentLease.tenantId))
-      .returning();
+      .eq('id', currentLease.tenantId)
+      .select('*')
+      .single();
+    if (tenantErr) throw tenantErr;
 
-    const updatedLease = await db
-      .update(leases)
-      .set({
-        landlordId: property.landlordId,
-        propertyId: property.id,
-        startDate: data.startDate,
-        endDate: data.endDate,
-        rentAmount: data.rentAmount,
-        chargesAmount: data.chargesAmount,
-        securityDeposit: data.securityDeposit,
-        paymentDueDay: data.paymentDueDay,
-        customClauses: data.customClauses || null,
+    const { data: updatedLease, error: leaseUpdErr } = await sb
+      .from('leases')
+      .update({
+        landlord_id: property.landlordId,
+        property_id: property.id,
+        start_date: data.startDate,
+        end_date: data.endDate,
+        rent_amount: Number(data.rentAmount),
+        charges_amount: Number(data.chargesAmount || 0),
+        security_deposit: Number(data.securityDeposit),
+        payment_due_day: Number(data.paymentDueDay),
+        custom_clauses: data.customClauses || null,
         status: data.status,
       })
-      .where(eq(leases.id, leaseId))
-      .returning();
+      .eq('id', leaseId)
+      .select('*')
+      .single();
+    if (leaseUpdErr) throw leaseUpdErr;
 
-    return { tenant: updatedTenant[0], lease: updatedLease[0] };
+    return {
+      tenant: mapTenantRow(updatedTenant),
+      lease: mapLeaseRow(updatedLease),
+    };
   } catch (error) {
-    console.error('Database query failed in updateTenantAndLeaseRecord:', error);
+    console.error('Supabase query failed in updateTenantAndLeaseRecord:', error);
     throw new Error('Impossible de modifier le dossier locataire et bail.', {
       cause: error,
     });
@@ -1109,27 +708,30 @@ export async function updatePaymentRecord(
   }
 ) {
   try {
-    const updated = await db
-      .update(payments)
-      .set({
-        periodLabel: data.periodLabel,
-        amountDue: data.amountDue,
-        amountPaid: data.amountPaid,
-        dueDate: data.dueDate,
-        paymentDate: data.paymentDate || null,
-        paymentMethod: data.paymentMethod || null,
+    const sb = requireSupabaseAdmin();
+    const { data: updated, error } = await sb
+      .from('payments')
+      .update({
+        period_label: data.periodLabel,
+        amount_due: Number(data.amountDue),
+        amount_paid: Number(data.amountPaid || 0),
+        due_date: data.dueDate,
+        payment_date: data.paymentDate || null,
+        payment_method: data.paymentMethod || null,
         status: data.status,
-        daysLate: data.daysLate,
+        days_late: Number(data.daysLate || 0),
       })
-      .where(eq(payments.id, paymentId))
-      .returning();
+      .eq('id', paymentId)
+      .select('*')
+      .maybeSingle();
 
-    if (!updated.length) {
+    if (error) throw error;
+    if (!updated) {
       throw new Error('Quittance introuvable');
     }
-    return updated[0];
+    return mapPaymentRow(updated);
   } catch (error) {
-    console.error('Database query failed in updatePaymentRecord:', error);
+    console.error('Supabase query failed in updatePaymentRecord:', error);
     throw new Error('Impossible de modifier la quittance.', { cause: error });
   }
 }
@@ -1148,47 +750,51 @@ export async function createPaymentRecord(data: {
   daysLate: number;
 }) {
   try {
-    const leaseRows = await db
-      .select()
-      .from(leases)
-      .where(eq(leases.id, data.leaseId));
-
-    if (!leaseRows.length) {
+    const sb = requireSupabaseAdmin();
+    const { data: leaseRow, error: leaseErr } = await sb
+      .from('leases')
+      .select('*')
+      .eq('id', data.leaseId)
+      .maybeSingle();
+    if (leaseErr) throw leaseErr;
+    if (!leaseRow) {
       throw new Error('Contrat de bail introuvable pour cette quittance');
     }
-    const lease = leaseRows[0];
+    const lease = mapLeaseRow(leaseRow);
 
     const randSuffix = Math.floor(1000 + Math.random() * 9000);
     const cleanPeriod = (data.periodMonth || '2026-11').replace('-', '');
     const receiptNumber = `QUIT-${cleanPeriod}-${randSuffix}`;
     const shareToken = `tok-quit-${Date.now()}-${randSuffix}`;
 
-    const inserted = await db
-      .insert(payments)
-      .values({
-        userId: data.userId,
-        receiptNumber,
-        leaseId: lease.id,
-        landlordId: lease.landlordId,
-        propertyId: lease.propertyId,
-        tenantId: lease.tenantId,
-        periodMonth: data.periodMonth || '2026-11',
-        periodLabel: data.periodLabel,
-        amountDue: data.amountDue,
-        amountPaid: data.amountPaid,
-        dueDate: data.dueDate,
-        paymentDate: data.paymentDate || null,
-        paymentMethod: data.paymentMethod || null,
+    const { data: inserted, error: insertErr } = await sb
+      .from('payments')
+      .insert({
+        user_id: data.userId,
+        receipt_number: receiptNumber,
+        lease_id: lease.id,
+        landlord_id: lease.landlordId,
+        property_id: lease.propertyId,
+        tenant_id: lease.tenantId,
+        period_month: data.periodMonth || '2026-11',
+        period_label: data.periodLabel,
+        amount_due: Number(data.amountDue),
+        amount_paid: Number(data.amountPaid || 0),
+        due_date: data.dueDate,
+        payment_date: data.paymentDate || null,
+        payment_method: data.paymentMethod || null,
         status: data.status,
-        daysLate: data.daysLate || 0,
-        whatsappSent: false,
-        shareToken,
+        days_late: Number(data.daysLate || 0),
+        whatsapp_sent: false,
+        share_token: shareToken,
       })
-      .returning();
+      .select('*')
+      .single();
+    if (insertErr) throw insertErr;
 
-    return inserted[0];
+    return mapPaymentRow(inserted);
   } catch (error) {
-    console.error('Database query failed in createPaymentRecord:', error);
+    console.error('Supabase query failed in createPaymentRecord:', error);
     throw new Error('Impossible de créer la quittance.', { cause: error });
   }
 }
@@ -1201,13 +807,16 @@ export async function generateRentCallsForMonthRecord(data: {
   initialStatus?: 'pending' | 'paid' | 'overdue';
 }) {
   try {
-    const [allLeases, existingPayments] = await Promise.all([
-      db.select().from(leases),
-      db
-        .select()
-        .from(payments)
-        .where(eq(payments.periodMonth, data.periodMonth)),
+    const sb = requireSupabaseAdmin();
+    const [leasesRes, paymentsRes] = await Promise.all([
+      sb.from('leases').select('*'),
+      sb.from('payments').select('*').eq('period_month', data.periodMonth),
     ]);
+    if (leasesRes.error) throw leasesRes.error;
+    if (paymentsRes.error) throw paymentsRes.error;
+
+    const allLeases = (leasesRes.data || []).map(mapLeaseRow);
+    const existingPayments = (paymentsRes.data || []).map(mapPaymentRow);
 
     const activeLeases = allLeases.filter((l) => l.status === 'active');
     const existingLeaseIds = new Set(existingPayments.map((p) => p.leaseId));
@@ -1227,38 +836,39 @@ export async function generateRentCallsForMonthRecord(data: {
 
     const valuesToInsert = missingLeases.map((lease, idx) => {
       const randSuffix = Math.floor(1000 + Math.random() * 9000) + idx;
-      const totalDue = String(
-        Number(lease.rentAmount || 0) + Number(lease.chargesAmount || 0)
-      );
+      const totalDue =
+        Number(lease.rentAmount || 0) + Number(lease.chargesAmount || 0);
       return {
-        userId: data.userId,
-        receiptNumber: `QUIT-${cleanPeriod}-${randSuffix}`,
-        leaseId: lease.id,
-        landlordId: lease.landlordId,
-        propertyId: lease.propertyId,
-        tenantId: lease.tenantId,
-        periodMonth: data.periodMonth,
-        periodLabel: data.periodLabel,
-        amountDue: totalDue,
-        amountPaid: status === 'paid' ? totalDue : '0',
-        dueDate,
-        paymentDate: status === 'paid' ? todayStr : null,
-        paymentMethod: status === 'paid' ? 'Mobile Money' : null,
+        user_id: data.userId,
+        receipt_number: `QUIT-${cleanPeriod}-${randSuffix}`,
+        lease_id: lease.id,
+        landlord_id: lease.landlordId,
+        property_id: lease.propertyId,
+        tenant_id: lease.tenantId,
+        period_month: data.periodMonth,
+        period_label: data.periodLabel,
+        amount_due: totalDue,
+        amount_paid: status === 'paid' ? totalDue : 0,
+        due_date: dueDate,
+        payment_date: status === 'paid' ? todayStr : null,
+        payment_method: status === 'paid' ? 'Mobile Money' : null,
         status,
-        daysLate: 0,
-        whatsappSent: false,
-        shareToken: `tok-quit-${Date.now()}-${randSuffix}`,
+        days_late: 0,
+        whatsapp_sent: false,
+        share_token: `tok-quit-${Date.now()}-${randSuffix}`,
       };
     });
 
-    const inserted = await db
-      .insert(payments)
-      .values(valuesToInsert)
-      .returning();
-    return inserted;
+    const { data: inserted, error: insertErr } = await sb
+      .from('payments')
+      .insert(valuesToInsert)
+      .select('*');
+    if (insertErr) throw insertErr;
+
+    return (inserted || []).map(mapPaymentRow);
   } catch (error) {
     console.error(
-      'Database query failed in generateRentCallsForMonthRecord:',
+      'Supabase query failed in generateRentCallsForMonthRecord:',
       error
     );
     throw new Error('Impossible de générer les appels de loyer du mois.', {
@@ -1269,55 +879,64 @@ export async function generateRentCallsForMonthRecord(data: {
 
 export async function deletePaymentRecord(paymentId: number) {
   try {
-    const deleted = await db
-      .delete(payments)
-      .where(eq(payments.id, paymentId))
-      .returning();
-    return deleted[0] || null;
+    const sb = requireSupabaseAdmin();
+    const { data: deleted, error } = await sb
+      .from('payments')
+      .delete()
+      .eq('id', paymentId)
+      .select('*')
+      .maybeSingle();
+    if (error) throw error;
+    return deleted ? mapPaymentRow(deleted) : null;
   } catch (error) {
-    console.error('Database query failed in deletePaymentRecord:', error);
+    console.error('Supabase query failed in deletePaymentRecord:', error);
     throw new Error('Impossible de supprimer la quittance.', { cause: error });
   }
 }
 
 export async function deleteLeaseRecord(leaseId: number) {
   try {
-    const existingLeases = await db
-      .select()
-      .from(leases)
-      .where(eq(leases.id, leaseId));
-    const targetLease = existingLeases[0];
+    const sb = requireSupabaseAdmin();
+    const { data: targetRow } = await sb
+      .from('leases')
+      .select('*')
+      .eq('id', leaseId)
+      .maybeSingle();
+    const targetLease = targetRow ? mapLeaseRow(targetRow) : null;
 
-    await db.delete(payments).where(eq(payments.leaseId, leaseId));
-    const deleted = await db
-      .delete(leases)
-      .where(eq(leases.id, leaseId))
-      .returning();
+    await sb.from('payments').delete().eq('lease_id', leaseId);
+    const { data: deleted, error } = await sb
+      .from('leases')
+      .delete()
+      .eq('id', leaseId)
+      .select('*')
+      .maybeSingle();
+    if (error) throw error;
 
     if (targetLease) {
-      const remainingLeasesForProp = await db
-        .select()
-        .from(leases)
-        .where(eq(leases.propertyId, targetLease.propertyId));
-      if (remainingLeasesForProp.length === 0) {
-        await db
-          .update(properties)
-          .set({ status: 'vacant' })
-          .where(eq(properties.id, targetLease.propertyId));
+      const { data: remainingForProp } = await sb
+        .from('leases')
+        .select('id')
+        .eq('property_id', targetLease.propertyId);
+      if (!remainingForProp || remainingForProp.length === 0) {
+        await sb
+          .from('properties')
+          .update({ status: 'vacant' })
+          .eq('id', targetLease.propertyId);
       }
 
-      const remainingLeasesForTenant = await db
-        .select()
-        .from(leases)
-        .where(eq(leases.tenantId, targetLease.tenantId));
-      if (remainingLeasesForTenant.length === 0) {
-        await db.delete(tenants).where(eq(tenants.id, targetLease.tenantId));
+      const { data: remainingForTenant } = await sb
+        .from('leases')
+        .select('id')
+        .eq('tenant_id', targetLease.tenantId);
+      if (!remainingForTenant || remainingForTenant.length === 0) {
+        await sb.from('tenants').delete().eq('id', targetLease.tenantId);
       }
     }
 
-    return deleted[0] || null;
+    return deleted ? mapLeaseRow(deleted) : null;
   } catch (error) {
-    console.error('Database query failed in deleteLeaseRecord:', error);
+    console.error('Supabase query failed in deleteLeaseRecord:', error);
     throw new Error('Impossible de supprimer le contrat de bail.', {
       cause: error,
     });
@@ -1326,15 +945,19 @@ export async function deleteLeaseRecord(leaseId: number) {
 
 export async function deletePropertyRecord(propertyId: number) {
   try {
-    await db.delete(payments).where(eq(payments.propertyId, propertyId));
-    await db.delete(leases).where(eq(leases.propertyId, propertyId));
-    const deleted = await db
-      .delete(properties)
-      .where(eq(properties.id, propertyId))
-      .returning();
-    return deleted[0] || null;
+    const sb = requireSupabaseAdmin();
+    await sb.from('payments').delete().eq('property_id', propertyId);
+    await sb.from('leases').delete().eq('property_id', propertyId);
+    const { data: deleted, error } = await sb
+      .from('properties')
+      .delete()
+      .eq('id', propertyId)
+      .select('*')
+      .maybeSingle();
+    if (error) throw error;
+    return deleted ? mapPropertyRow(deleted) : null;
   } catch (error) {
-    console.error('Database query failed in deletePropertyRecord:', error);
+    console.error('Supabase query failed in deletePropertyRecord:', error);
     throw new Error('Impossible de supprimer le bien immobilier.', {
       cause: error,
     });
@@ -1343,16 +966,20 @@ export async function deletePropertyRecord(propertyId: number) {
 
 export async function deleteLandlordRecord(landlordId: number) {
   try {
-    await db.delete(payments).where(eq(payments.landlordId, landlordId));
-    await db.delete(leases).where(eq(leases.landlordId, landlordId));
-    await db.delete(properties).where(eq(properties.landlordId, landlordId));
-    const deleted = await db
-      .delete(landlords)
-      .where(eq(landlords.id, landlordId))
-      .returning();
-    return deleted[0] || null;
+    const sb = requireSupabaseAdmin();
+    await sb.from('payments').delete().eq('landlord_id', landlordId);
+    await sb.from('leases').delete().eq('landlord_id', landlordId);
+    await sb.from('properties').delete().eq('landlord_id', landlordId);
+    const { data: deleted, error } = await sb
+      .from('landlords')
+      .delete()
+      .eq('id', landlordId)
+      .select('*')
+      .maybeSingle();
+    if (error) throw error;
+    return deleted ? mapLandlordRow(deleted) : null;
   } catch (error) {
-    console.error('Database query failed in deleteLandlordRecord:', error);
+    console.error('Supabase query failed in deleteLandlordRecord:', error);
     throw new Error('Impossible de supprimer le bailleur.', { cause: error });
   }
 }
@@ -1365,17 +992,23 @@ export async function renamePropertyTypeInRecords(
     if (!oldTypeName || !newTypeName || oldTypeName === newTypeName) {
       return [];
     }
-    const updated = await db
-      .update(properties)
-      .set({ propertyType: newTypeName })
-      .where(eq(properties.propertyType, oldTypeName))
-      .returning();
-    return updated;
+    const sb = requireSupabaseAdmin();
+    const { data: updated, error } = await sb
+      .from('properties')
+      .update({ property_type: newTypeName })
+      .eq('property_type', oldTypeName)
+      .select('*');
+    if (error) throw error;
+    return (updated || []).map(mapPropertyRow);
   } catch (error) {
-    console.error('Database query failed in renamePropertyTypeInRecords:', error);
-    throw new Error('Impossible de renommer le type de bien sur les lots existants.', {
-      cause: error,
-    });
+    console.error(
+      'Supabase query failed in renamePropertyTypeInRecords:',
+      error
+    );
+    throw new Error(
+      'Impossible de renommer le type de bien sur les lots existants.',
+      { cause: error }
+    );
   }
 }
 
@@ -1388,14 +1021,17 @@ export async function upsertLandlordPortalCredentialsRecord(
     regeneratePassword?: boolean;
   }
 ) {
-  const rows = await db
-    .select()
-    .from(landlords)
-    .where(eq(landlords.id, landlordId));
-  if (!rows.length) {
+  const sb = requireSupabaseAdmin();
+  const { data: existingRow, error: fetchErr } = await sb
+    .from('landlords')
+    .select('*')
+    .eq('id', landlordId)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+  if (!existingRow) {
     throw new Error('Bailleur introuvable.');
   }
-  const existing = rows[0];
+  const existing = mapLandlordRow(existingRow);
 
   const nextUsername =
     options.portalUsername && options.portalUsername.trim()
@@ -1418,17 +1054,19 @@ export async function upsertLandlordPortalCredentialsRecord(
       ? Boolean(options.portalEnabled)
       : existing.portalEnabled ?? true;
 
-  const updated = await db
-    .update(landlords)
-    .set({
-      portalUsername: nextUsername,
-      portalPassword: nextPassword,
-      portalEnabled: nextEnabled,
+  const { data: updated, error: updateErr } = await sb
+    .from('landlords')
+    .update({
+      portal_username: nextUsername,
+      portal_password: nextPassword,
+      portal_enabled: nextEnabled,
     })
-    .where(eq(landlords.id, landlordId))
-    .returning();
+    .eq('id', landlordId)
+    .select('*')
+    .single();
+  if (updateErr) throw updateErr;
 
-  return updated[0];
+  return mapLandlordRow(updated);
 }
 
 export async function authenticateLandlordPortalRecord(
@@ -1446,12 +1084,14 @@ export async function authenticateLandlordPortalRecord(
     );
   }
 
-  const allLandlords = explicitLandlordId
-    ? await db
-        .select()
-        .from(landlords)
-        .where(eq(landlords.id, explicitLandlordId))
-    : await db.select().from(landlords);
+  const sb = requireSupabaseAdmin();
+  const query = explicitLandlordId
+    ? sb.from('landlords').select('*').eq('id', explicitLandlordId)
+    : sb.from('landlords').select('*');
+  const { data: rows, error: listErr } = await query;
+  if (listErr) throw listErr;
+
+  const allLandlords = (rows || []).map(mapLandlordRow);
 
   const candidates = allLandlords.filter((l) => {
     if (explicitLandlordId && l.id === explicitLandlordId) {
@@ -1510,29 +1150,33 @@ export async function authenticateLandlordPortalRecord(
     );
   }
 
-  const [updatedRows, landlordProperties, landlordLeases, landlordPayments] =
-    await Promise.all([
-      db
-        .update(landlords)
-        .set({ portalLastLoginAt: new Date() })
-        .where(eq(landlords.id, matched.id))
-        .returning(),
-      db
-        .select()
-        .from(properties)
-        .where(eq(properties.landlordId, matched.id))
-        .orderBy(desc(properties.id)),
-      db
-        .select()
-        .from(leases)
-        .where(eq(leases.landlordId, matched.id))
-        .orderBy(desc(leases.id)),
-      db
-        .select()
-        .from(payments)
-        .where(eq(payments.landlordId, matched.id))
-        .orderBy(desc(payments.id)),
-    ]);
+  const [updatedRes, propsRes, leasesRes, paysRes] = await Promise.all([
+    sb
+      .from('landlords')
+      .update({ portal_last_login_at: new Date().toISOString() })
+      .eq('id', matched.id)
+      .select('*')
+      .maybeSingle(),
+    sb
+      .from('properties')
+      .select('*')
+      .eq('landlord_id', matched.id)
+      .order('id', { ascending: false }),
+    sb
+      .from('leases')
+      .select('*')
+      .eq('landlord_id', matched.id)
+      .order('id', { ascending: false }),
+    sb
+      .from('payments')
+      .select('*')
+      .eq('landlord_id', matched.id)
+      .order('id', { ascending: false }),
+  ]);
+
+  const landlordProperties = (propsRes.data || []).map(mapPropertyRow);
+  const landlordLeases = (leasesRes.data || []).map(mapLeaseRow);
+  const landlordPayments = (paysRes.data || []).map(mapPaymentRow);
 
   const tenantIds = Array.from(
     new Set([
@@ -1541,18 +1185,20 @@ export async function authenticateLandlordPortalRecord(
     ])
   );
 
-  const landlordTenants =
-    tenantIds.length > 0
-      ? await db.select().from(tenants).where(inArray(tenants.id, tenantIds))
-      : [];
+  let landlordTenants: ReturnType<typeof mapTenantRow>[] = [];
+  if (tenantIds.length > 0) {
+    const { data: tRows } = await sb
+      .from('tenants')
+      .select('*')
+      .in('id', tenantIds);
+    landlordTenants = (tRows || []).map(mapTenantRow);
+  }
 
   return {
-    landlord: updatedRows[0] || matched,
+    landlord: updatedRes.data ? mapLandlordRow(updatedRes.data) : matched,
     properties: landlordProperties,
     leases: landlordLeases,
     tenants: landlordTenants,
     payments: landlordPayments,
   };
 }
-
-

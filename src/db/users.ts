@@ -1,34 +1,35 @@
-import { eq, asc } from 'drizzle-orm';
-import { db } from './index.ts';
-import { users } from './schema.ts';
+import { requireSupabaseAdmin } from './supabase.ts';
 import type { AppUser, UserRole } from '../types/gimmo.ts';
 import { normalizeUserRole } from '../lib/rbac.ts';
 
-function mapRowToAppUser(row: typeof users.$inferSelect): AppUser {
+function mapRowToAppUser(row: any): AppUser {
   return {
-    id: row.id,
-    uid: row.uid,
-    email: row.email,
-    name: row.name || row.email.split('@')[0],
+    id: Number(row.id),
+    uid: String(row.uid || ''),
+    email: String(row.email || ''),
+    name: row.name || String(row.email || '').split('@')[0],
     role: normalizeUserRole(row.role),
-    createdAt:
-      row.createdAt instanceof Date
-        ? row.createdAt.toISOString()
-        : String(row.createdAt || new Date().toISOString()),
+    createdAt: row.created_at
+      ? String(row.created_at)
+      : new Date().toISOString(),
   };
 }
 
 export async function ensureInitialUsers(): Promise<void> {
-  // Base Cloud SQL laissée vierge sans données de démonstration automatiques
   return;
 }
 
 export async function getAllUsers(): Promise<AppUser[]> {
   try {
-    const rows = await db.select().from(users).orderBy(asc(users.id));
-    return rows.map(mapRowToAppUser);
+    const sb = requireSupabaseAdmin();
+    const { data, error } = await sb
+      .from('users')
+      .select('*')
+      .order('id', { ascending: true });
+    if (error) throw error;
+    return (data || []).map(mapRowToAppUser);
   } catch (error) {
-    console.error('Database query failed in getAllUsers:', error);
+    console.error('Supabase query failed in getAllUsers:', error);
     return [];
   }
 }
@@ -40,55 +41,56 @@ export async function getOrCreateUser(
   requestedRole?: UserRole
 ): Promise<AppUser> {
   try {
-    await ensureInitialUsers();
+    const sb = requireSupabaseAdmin();
+    const cleanEmail = email.trim().toLowerCase();
 
-    // Vérifier d'abord si un utilisateur avec cet email existe déjà
-    const byEmail = await db
-      .select()
-      .from(users)
-      .where(eq(users.email, email));
+    const { data: byEmail, error: emailErr } = await sb
+      .from('users')
+      .select('*')
+      .eq('email', cleanEmail)
+      .limit(1);
+    if (emailErr) throw emailErr;
 
-    if (byEmail.length > 0) {
+    if (byEmail && byEmail.length > 0) {
       const existingUser = byEmail[0];
       const nextRole = requestedRole
         ? normalizeUserRole(requestedRole)
         : normalizeUserRole(existingUser.role);
-      const updated = await db
-        .update(users)
-        .set({
-          name: name || existingUser.name || email.split('@')[0],
+      const { data: updated, error: updateErr } = await sb
+        .from('users')
+        .update({
+          name: name || existingUser.name || cleanEmail.split('@')[0],
           role: nextRole,
         })
-        .where(eq(users.id, existingUser.id))
-        .returning();
-      return mapRowToAppUser(updated[0]);
+        .eq('id', existingUser.id)
+        .select('*')
+        .single();
+      if (updateErr) throw updateErr;
+      return mapRowToAppUser(updated);
     }
 
     const defaultRole: UserRole = requestedRole
       ? normalizeUserRole(requestedRole)
       : 'administrateur';
 
-    const result = await db
-      .insert(users)
-      .values({
-        uid,
-        email,
-        name: name || email.split('@')[0],
-        role: defaultRole,
-      })
-      .onConflictDoUpdate({
-        target: users.uid,
-        set: {
-          email,
-          name: name || email.split('@')[0],
-          ...(requestedRole ? { role: normalizeUserRole(requestedRole) } : {}),
+    const { data: upserted, error: upsertErr } = await sb
+      .from('users')
+      .upsert(
+        {
+          uid,
+          email: cleanEmail,
+          name: name || cleanEmail.split('@')[0],
+          role: defaultRole,
         },
-      })
-      .returning();
+        { onConflict: 'uid' }
+      )
+      .select('*')
+      .single();
+    if (upsertErr) throw upsertErr;
 
-    return mapRowToAppUser(result[0]);
+    return mapRowToAppUser(upserted);
   } catch (error) {
-    console.error('Database query failed in getOrCreateUser:', error);
+    console.error('Supabase query failed in getOrCreateUser:', error);
     throw new Error('Failed to synchronize user profile.', { cause: error });
   }
 }
@@ -100,57 +102,65 @@ export async function upsertUserRecord(data: {
   role: UserRole;
 }): Promise<AppUser> {
   try {
-    await ensureInitialUsers();
+    const sb = requireSupabaseAdmin();
     const cleanEmail = data.email.trim().toLowerCase();
     const cleanName = data.name.trim() || cleanEmail.split('@')[0];
     const cleanRole = normalizeUserRole(data.role);
 
     if (data.id) {
-      const updated = await db
-        .update(users)
-        .set({
+      const { data: updated, error } = await sb
+        .from('users')
+        .update({
           email: cleanEmail,
           name: cleanName,
           role: cleanRole,
         })
-        .where(eq(users.id, Number(data.id)))
-        .returning();
-      if (updated.length > 0) {
-        return mapRowToAppUser(updated[0]);
+        .eq('id', Number(data.id))
+        .select('*')
+        .maybeSingle();
+      if (error) throw error;
+      if (updated) {
+        return mapRowToAppUser(updated);
       }
     }
 
-    const existingByEmail = await db
-      .select()
-      .from(users)
-      .where(eq(users.email, cleanEmail));
+    const { data: existingByEmail, error: findErr } = await sb
+      .from('users')
+      .select('*')
+      .eq('email', cleanEmail)
+      .limit(1);
+    if (findErr) throw findErr;
 
-    if (existingByEmail.length > 0) {
-      const updated = await db
-        .update(users)
-        .set({
+    if (existingByEmail && existingByEmail.length > 0) {
+      const { data: updated, error: updateErr } = await sb
+        .from('users')
+        .update({
           name: cleanName,
           role: cleanRole,
         })
-        .where(eq(users.id, existingByEmail[0].id))
-        .returning();
-      return mapRowToAppUser(updated[0]);
+        .eq('id', existingByEmail[0].id)
+        .select('*')
+        .single();
+      if (updateErr) throw updateErr;
+      return mapRowToAppUser(updated);
     }
 
     const generatedUid = `gimmo-${cleanRole}-${Date.now()}`;
-    const inserted = await db
-      .insert(users)
-      .values({
+    const { data: inserted, error: insertErr } = await sb
+      .from('users')
+      .insert({
         uid: generatedUid,
         email: cleanEmail,
         name: cleanName,
         role: cleanRole,
       })
-      .returning();
+      .select('*')
+      .single();
+    if (insertErr) throw insertErr;
 
-    return mapRowToAppUser(inserted[0]);
+    return mapRowToAppUser(inserted);
   } catch (error) {
-    console.error('Database query failed in upsertUserRecord:', error);
+    console.error('Supabase query failed in upsertUserRecord:', error);
     throw new Error("Impossible d'enregistrer le compte utilisateur.", {
       cause: error,
     });
@@ -159,9 +169,11 @@ export async function upsertUserRecord(data: {
 
 export async function deleteUserRecord(userId: number): Promise<void> {
   try {
-    await db.delete(users).where(eq(users.id, userId));
+    const sb = requireSupabaseAdmin();
+    const { error } = await sb.from('users').delete().eq('id', userId);
+    if (error) throw error;
   } catch (error) {
-    console.error('Database query failed in deleteUserRecord:', error);
+    console.error('Supabase query failed in deleteUserRecord:', error);
     throw new Error("Impossible de supprimer l'utilisateur.", { cause: error });
   }
 }

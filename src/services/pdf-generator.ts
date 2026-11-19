@@ -29,12 +29,9 @@ import {
   interpolateTemplateVariables,
 } from '../lib/document-templates.ts';
 import { validateWhatsAppPhone } from '../lib/agency-notifications.ts';
-import { db } from '../db/index.ts';
-import { appSettings } from '../db/schema.ts';
-import { eq } from 'drizzle-orm';
 import {
   loadAppSettingsFromSupabase,
-  syncAppSettingsToSupabase,
+  saveAppSettingsToSupabase,
 } from '../db/supabase.ts';
 
 const SAAS_SETTINGS_ROW_ID = 'gimmo_saas_store';
@@ -66,23 +63,6 @@ function normalizeLoadedStore(parsed: DocumentTemplatesStore): DocumentTemplates
 
 export async function initTemplatesStoreFromDb(): Promise<DocumentTemplatesStore> {
   try {
-    const rows = await db
-      .select()
-      .from(appSettings)
-      .where(eq(appSettings.id, SAAS_SETTINGS_ROW_ID));
-    if (rows.length > 0 && rows[0].storeJson) {
-      const parsed = JSON.parse(rows[0].storeJson) as DocumentTemplatesStore;
-      if (parsed && parsed.leases && parsed.receipts) {
-        memoryTemplatesStore = normalizeLoadedStore(parsed);
-        return memoryTemplatesStore;
-      }
-    }
-  } catch (err) {
-    console.warn('Could not load SaaS store from Cloud SQL app_settings:', err);
-  }
-
-  // Repli optionnel sur Supabase si configuré et tables initialisées
-  try {
     const supabaseJson = await loadAppSettingsFromSupabase(SAAS_SETTINGS_ROW_ID);
     if (supabaseJson) {
       const parsed = JSON.parse(supabaseJson) as DocumentTemplatesStore;
@@ -91,8 +71,8 @@ export async function initTemplatesStoreFromDb(): Promise<DocumentTemplatesStore
         return memoryTemplatesStore;
       }
     }
-  } catch {
-    // Ignore si les tables Supabase ne sont pas encore créées
+  } catch (err) {
+    console.warn('Could not load SaaS store from Supabase app_settings:', err);
   }
 
   return getDocumentTemplatesStore();
@@ -108,27 +88,12 @@ async function persistTemplatesStore(
   } catch (err) {
     console.warn('Could not persist .gimmo-document-templates.json:', err);
   }
-  // Persistance durable synchrone (await) dans Cloud SQL (table app_settings)
+  // Persistance directe dans Supabase (table public.app_settings)
   try {
-    await db
-      .insert(appSettings)
-      .values({
-        id: SAAS_SETTINGS_ROW_ID,
-        storeJson: serialized,
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: appSettings.id,
-        set: {
-          storeJson: serialized,
-          updatedAt: new Date(),
-        },
-      });
+    await saveAppSettingsToSupabase(SAAS_SETTINGS_ROW_ID, serialized);
   } catch (err) {
-    console.warn('Could not persist SaaS store to Cloud SQL app_settings:', err);
+    console.warn('Could not persist SaaS store to Supabase app_settings:', err);
   }
-  // Réplication asynchrone vers Supabase si configuré et tables créées
-  void syncAppSettingsToSupabase(SAAS_SETTINGS_ROW_ID, serialized);
   return next;
 }
 
