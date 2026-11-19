@@ -112,22 +112,22 @@
     }
   ],
   "managementCompany": {
-    "companyName": "GIMMO PRESTIGE IMMOBILIER SARL",
-    "tradeName": "GIMMO GESTION & PATRIMOINE",
-    "legalForm": "SARL au capital de 10 000 000 FCFA",
-    "rccm": "CI-ABJ-03-2024-B12-04892",
-    "taxId": "CC 2408915 M",
-    "licenseNumber": "Agrément MCLU N° 0184/MCLU/DGLCV/AG",
-    "managerName": "M. Ghislain Assamoi",
+    "companyName": "KLAUSE IMMOBILIER",
+    "tradeName": "KLAUSE IMMOBILIER",
+    "legalForm": "SARL au capital de 5 000 000 FCFA",
+    "rccm": "CI-ABJ-2026-B-001",
+    "taxId": "2600001 A",
+    "licenseNumber": "Agrément Ministériel N° 0188/MCLU/DGLCV",
+    "managerName": "KOUAKOU LAUSSIN EMMANUEL",
     "managerTitle": "Directeur Général & Administrateur de Biens",
-    "address": "Cocody Deux-Plateaux Vallons, Boulevard Latrille",
+    "address": "Cocody Riviera, Abidjan",
     "city": "Abidjan",
-    "phone": "+225 07 07 00 11 22",
-    "email": "assamoighislain@gmail.com",
+    "phone": "+225 01 02 20 20 62",
+    "email": "info@klauseimmobilier.net",
     "website": "www.gimmo-prestige.ci",
     "bankInfo": "SGBCI CI008 01111 012345678901 88 · Orange Money Marchand : #144*821#",
     "headerSlogan": "Société de Gérance Locative, Syndic de Copropriété & Administration de Patrimoine Immobilier",
-    "updatedAt": "2026-11-19T14:14:30.036Z"
+    "updatedAt": "2026-11-19T19:29:45.643Z"
   },
   "saasTenants": [
     {
@@ -150,8 +150,31 @@
       "maxProperties": 500,
       "whatsappPhone": "+225 07 07 00 11 22",
       "monthlyFeeFcfa": 150000,
-      "isCurrentTenant": true,
+      "isCurrentTenant": false,
       "subscriptionEndsAt": "2027-12-31"
+    },
+    {
+      "id": "tenant_klause_immobilier",
+      "companyName": "KLAUSE IMMOBILIER",
+      "tradeName": "KLAUSE IMMOBILIER",
+      "legalForm": "SARL au capital de 5 000 000 FCFA",
+      "rccm": "CI-ABJ-2026-B-001",
+      "taxId": "2600001 A",
+      "licenseNumber": "Agrément Ministériel N° 0188/MCLU/DGLCV",
+      "managerName": "KOUAKOU LAUSSIN EMMANUEL",
+      "ownerEmail": "info@klauseimmobilier.net",
+      "phone": "+225 01 02 20 20 62",
+      "whatsappPhone": "+225 01 02 20 20 62",
+      "address": "Cocody Riviera, Abidjan",
+      "city": "Abidjan",
+      "plan": "pro",
+      "status": "active",
+      "monthlyFeeFcfa": 75000,
+      "maxProperties": 150,
+      "maxLandlords": 35,
+      "subscriptionEndsAt": "2027-12-31",
+      "isCurrentTenant": true,
+      "createdAt": "2026-11-19T19:29:44.031Z"
     }
   ],
   "saasUsers": [
@@ -165,7 +188,21 @@
       "createdAt": "2026-01-01T00:00:00.000Z",
       "tenantName": "GIMMO PRESTIGE IMMOBILIER SARL",
       "lastLoginAt": "2026-11-19T14:14:30.036Z"
+    },
+    {
+      "id": "user_owner_1795116584032_wveq",
+      "fullName": "KOUAKOU LAUSSIN EMMANUEL",
+      "email": "info@klauseimmobilier.net",
+      "whatsappPhone": "+225 01 02 20 20 62",
+      "role": "agency_admin",
+      "tenantId": "tenant_klause_immobilier",
+      "tenantName": "KLAUSE IMMOBILIER",
+      "status": "active",
+      "createdAt": "2026-11-19T19:29:44.031Z",
+      "password": "9399Klause",
+      "createdByEmail": "assamoighislain@gmail.com",
+      "lastLoginAt": "2026-11-19T19:29:45.643Z"
     }
   ],
-  "updatedAt": "2026-11-19T14:14:30.036Z"
+  "updatedAt": "2026-11-19T19:29:45.643Z"
 }
