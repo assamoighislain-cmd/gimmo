@@ -48,6 +48,7 @@ import {
   deleteSaaSTenantEntry,
   upsertSaaSUserEntry,
   deleteSaaSUserEntry,
+  authenticateSaaSUserEntry,
   upsertAccountingMonthEntry,
   deleteAccountingMonthEntry,
   upsertPropertyTypeEntry,
@@ -514,6 +515,40 @@ async function startServer() {
       res
         .status(500)
         .json({ error: error.message || 'Erreur suppression agence SaaS' });
+    }
+  });
+
+  app.post('/api/saas/login', async (req, res) => {
+    try {
+      const { email, password } = req.body || {};
+      const result = await authenticateSaaSUserEntry(
+        String(email || ''),
+        String(password || '')
+      );
+      if (!result.ok) {
+        return res.status(result.status).json({
+          ok: false,
+          code: result.code,
+          error: result.error,
+        });
+      }
+      await broadcastRealtimeState(
+        `Connexion utilisateur : ${result.user?.email || email}`
+      );
+      return res.json({
+        ok: true,
+        user: result.user,
+        agency: result.agency,
+        templates: result.templates,
+      });
+    } catch (error: any) {
+      console.error('SaaS login error:', error);
+      return res.status(500).json({
+        ok: false,
+        error:
+          error?.message ||
+          'Impossible de joindre la base Supabase pour vérifier vos identifiants.',
+      });
     }
   });
 

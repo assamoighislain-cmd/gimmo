@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   X,
   LogIn,
@@ -10,7 +10,6 @@ import {
   AlertTriangle,
   Mail,
   Lock,
-  ShieldCheck,
   BookOpen,
   Clock,
   Volume2,
@@ -18,10 +17,6 @@ import {
   KeyRound,
   Eye,
   EyeOff,
-  Copy,
-  Check,
-  ExternalLink,
-  RefreshCw,
 } from 'lucide-react';
 import {
   type SaaSTenantAgency,
@@ -43,25 +38,21 @@ import {
   type AgencyWhatsAppNotification,
 } from '../lib/agency-notifications.ts';
 import { authenticateOrRefreshLandlordPortalClient } from '../lib/landlord-portal.ts';
-import {
-  checkCurrentDomainAuthorized,
-  formatFirebaseAuthErrorFr,
-  isFirebaseUnauthorizedDomainError,
-  firebaseConfig,
-  type DomainAuthCheckResult,
-} from '../lib/firebase.ts';
 
 interface AuthAccountModalProps {
   templatesStore: DocumentTemplatesStore;
   activeAccount: SaaSUserAccount | null;
-  onLoginSuccess: (account: SaaSUserAccount, agency: SaaSTenantAgency) => Promise<void>;
+  onLoginSuccess: (
+    account: SaaSUserAccount,
+    agency: SaaSTenantAgency,
+    freshTemplates?: DocumentTemplatesStore
+  ) => Promise<void>;
   onAgencyRegistered?: (updatedTemplates?: DocumentTemplatesStore) => Promise<void>;
   onLandlordPortalLoginSuccess?: (
     session: LandlordPortalSession,
     passwordUsed: string
   ) => void;
   onLogout: () => Promise<void>;
-  onGoogleLogin: (targetTenantId: string) => Promise<void>;
   onClose?: () => void;
   fullScreenPage?: boolean;
 }
@@ -80,7 +71,6 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
   onAgencyRegistered,
   onLandlordPortalLoginSuccess,
   onLogout,
-  onGoogleLogin,
   onClose,
   fullScreenPage = false,
 }) => {
@@ -98,6 +88,7 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
   });
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
 
   // État connexion Portail Bailleur
   const [landlordIdentifier, setLandlordIdentifier] = useState('');
@@ -108,6 +99,7 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
   const [regFullName, setRegFullName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
+  const [showRegPassword, setShowRegPassword] = useState(false);
   const [whatsappCountryCode, setWhatsappCountryCode] = useState('225');
   const [newAgencyWhatsapp, setNewAgencyWhatsapp] = useState('');
   const [newAgencyName, setNewAgencyName] = useState('');
@@ -135,40 +127,7 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
   );
   const [createdNotification, setCreatedNotification] =
     useState<AgencyWhatsAppNotification | null>(null);
-  const [domainCheck, setDomainCheck] = useState<DomainAuthCheckResult | null>(
-    null
-  );
-  const [copiedDomain, setCopiedDomain] = useState(false);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    checkCurrentDomainAuthorized().then((res) => {
-      if (active) {
-        setDomainCheck(res);
-      }
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const handleCopyCurrentDomain = async (domain: string) => {
-    if (!domain) return;
-    try {
-      await navigator.clipboard.writeText(domain);
-      setCopiedDomain(true);
-      setTimeout(() => setCopiedDomain(false), 2500);
-    } catch {
-      // ignore clipboard restriction
-    }
-  };
-
-  const defaultTenantId =
-    activeAccount?.tenantId ||
-    tenants.find((t) => t.isCurrentTenant)?.id ||
-    tenants[0]?.id ||
-    'tenant-gimmo-hq';
 
   const activateAccountAndAgency = async (user: SaaSUserAccount) => {
     setSubmitting(true);
@@ -228,84 +187,145 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
     setApprovalPendingNotice(null);
 
     const normalizedEmail = loginEmail.trim().toLowerCase();
+    const typedPassword = loginPassword.trim();
     if (!normalizedEmail) {
       setErrorMsg('Veuillez saisir votre adresse email professionnelle.');
       return;
     }
 
-    const foundUser =
-      normalizedEmail === 'assamoighislain@gmail.com'
-        ? users.find(
-            (u) =>
-              u.email.trim().toLowerCase() === normalizedEmail &&
-              u.role === 'super_admin'
-          ) ||
-          users.find((u) => u.email.trim().toLowerCase() === normalizedEmail)
-        : [...users]
-            .reverse()
-            .find((u) => u.email.trim().toLowerCase() === normalizedEmail);
+    setSubmitting(true);
+    try {
+      // 1. Authentification directe côté serveur (lecture fraîche dans Supabase)
+      if (typeof navigator === 'undefined' || navigator.onLine) {
+        try {
+          const response = await fetch('/api/saas/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: normalizedEmail,
+              password: typedPassword,
+            }),
+          });
 
-    if (foundUser) {
-      if (foundUser.status === 'suspended') {
-        setErrorMsg(
-          'Ce compte utilisateur est suspendu par l’Administrateur ou le Directeur d’Agence.'
-        );
-        return;
-      }
+          const contentType = response.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const payload = await response.json();
 
-      const storedPassword = (foundUser.password || '').trim();
-      if (storedPassword) {
-        const typedPassword = loginPassword.trim();
-        const isPasswordMatch =
-          typedPassword === storedPassword ||
-          (storedPassword.toUpperCase().startsWith('GIM-') &&
-            typedPassword.toUpperCase() === storedPassword.toUpperCase());
-        if (!isPasswordMatch) {
-          setErrorMsg('Mot de passe incorrect pour ce compte utilisateur.');
-          return;
+            if (response.ok && payload.ok && payload.user) {
+              await onLoginSuccess(
+                payload.user,
+                payload.agency ||
+                  tenants.find((t) => t.id === payload.user.tenantId) ||
+                  tenants[0],
+                payload.templates
+              );
+              onClose?.();
+              return;
+            }
+
+            if (payload.code === 'PENDING_APPROVAL') {
+              setApprovalPendingNotice(
+                payload.error ||
+                  'Votre agence immobilière est actuellement en attente d’approbation par le Super Admin (assamoighislain@gmail.com).'
+              );
+              return;
+            }
+
+            setErrorMsg(
+              payload.error ||
+                'Identifiants invalides ou compte introuvable.'
+            );
+            return;
+          }
+        } catch {
+          // Bascule sur le cache local uniquement en cas d'indisponibilité réseau
         }
       }
 
-      const syncedUser: SaaSUserAccount = {
-        ...foundUser,
-        lastLoginAt: new Date().toISOString(),
-      };
-      await executeMutation('/api/saas/users', 'POST', {
-        ...syncedUser,
-        isLoginSync: true,
-      }).catch(() => {});
+      // 2. Mode hors-ligne uniquement : vérification sur le snapshot local
+      const foundUser =
+        normalizedEmail === 'assamoighislain@gmail.com'
+          ? users.find(
+              (u) =>
+                u.email.trim().toLowerCase() === normalizedEmail &&
+                u.role === 'super_admin'
+            ) ||
+            users.find((u) => u.email.trim().toLowerCase() === normalizedEmail)
+          : [...users]
+              .reverse()
+              .find((u) => u.email.trim().toLowerCase() === normalizedEmail);
 
-      await activateAccountAndAgency(syncedUser);
-      return;
+      if (foundUser) {
+        if (
+          foundUser.status === 'suspended' &&
+          normalizedEmail !== 'assamoighislain@gmail.com'
+        ) {
+          setErrorMsg(
+            'Ce compte utilisateur est suspendu par l’Administrateur ou le Directeur d’Agence.'
+          );
+          return;
+        }
+
+        const storedPassword = (foundUser.password || '').trim();
+        if (storedPassword) {
+          if (!typedPassword) {
+            setErrorMsg('Veuillez saisir votre mot de passe.');
+            return;
+          }
+          const isPasswordMatch =
+            typedPassword === storedPassword ||
+            (storedPassword.toUpperCase().startsWith('GIM-') &&
+              typedPassword.toUpperCase() === storedPassword.toUpperCase());
+          if (!isPasswordMatch) {
+            setErrorMsg('Mot de passe incorrect pour ce compte utilisateur.');
+            return;
+          }
+        }
+
+        const syncedUser: SaaSUserAccount = {
+          ...foundUser,
+          lastLoginAt: new Date().toISOString(),
+        };
+        await executeMutation('/api/saas/users', 'POST', {
+          ...syncedUser,
+          isLoginSync: true,
+        }).catch(() => {});
+
+        await activateAccountAndAgency(syncedUser);
+        return;
+      }
+
+      if (normalizedEmail === 'assamoighislain@gmail.com') {
+        const chosenAgency =
+          tenants.find((t) => t.isCurrentTenant) || tenants[0];
+        const nowIso = new Date().toISOString();
+        const superAdminAccount: SaaSUserAccount = {
+          id: 'user_super_admin_main',
+          fullName: 'Ghislain Assamoi',
+          email: normalizedEmail,
+          role: 'super_admin',
+          tenantId: chosenAgency.id,
+          tenantName: chosenAgency.companyName,
+          status: 'active',
+          lastLoginAt: nowIso,
+          createdAt: nowIso.split('T')[0],
+        };
+        await executeMutation('/api/saas/users', 'POST', {
+          ...superAdminAccount,
+          isLoginSync: true,
+        }).catch(() => {});
+        await activateAccountAndAgency(superAdminAccount);
+        return;
+      }
+
+      setErrorMsg(
+        'Aucun compte trouvé pour cette adresse email. Seul l’Administrateur ou le Directeur de l’Agence peut créer les comptes des autres utilisateurs et leur affecter un rôle. Pour enregistrer une nouvelle agence immobilière, utilisez l’onglet « Créer une agence ».'
+      );
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Impossible de connecter ce compte.');
+    } finally {
+      setSubmitting(false);
     }
-
-    // Si c'est le Super Admin principal
-    if (normalizedEmail === 'assamoighislain@gmail.com') {
-      const chosenAgency =
-        tenants.find((t) => t.isCurrentTenant) || tenants[0];
-      const nowIso = new Date().toISOString();
-      const superAdminAccount: SaaSUserAccount = {
-        id: 'usr-super-admin-ghislain',
-        fullName: 'Ghislain Assamoi',
-        email: normalizedEmail,
-        role: 'super_admin',
-        tenantId: chosenAgency.id,
-        tenantName: chosenAgency.companyName,
-        status: 'active',
-        lastLoginAt: nowIso,
-        createdAt: nowIso.split('T')[0],
-      };
-      await executeMutation('/api/saas/users', 'POST', {
-        ...superAdminAccount,
-        isLoginSync: true,
-      }).catch(() => {});
-      await activateAccountAndAgency(superAdminAccount);
-      return;
-    }
-
-    setErrorMsg(
-      'Aucun compte trouvé pour cette adresse email. Seul l’Administrateur ou le Directeur de l’Agence peut créer les comptes des autres utilisateurs et leur affecter un rôle. Pour enregistrer une nouvelle agence immobilière, utilisez l’onglet « Créer une agence ».'
-    );
   };
 
   const handleLandlordPortalSubmit = async (e: React.FormEvent) => {
@@ -506,10 +526,10 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
       setLoginEmail(normalizedEmail);
       setApprovalPendingNotice(
         wasSavedOfflineOnly
-          ? `Attention : L’agence « ${newAgencyPayload.companyName} » a été enregistrée uniquement dans la mémoire locale de ce navigateur car le serveur Cloud SQL (/api/saas/tenants) n’est pas joignable sur cette adresse ou connexion. Pour qu’elle soit visible et approuvée par le Super Admin (assamoighislain@gmail.com) sur tous les appareils, ouvrez l’adresse officielle connectée au serveur Cloud SQL ou cliquez sur le bouton « Sync » dès le retour de la connexion.`
+          ? `Attention : L’agence « ${newAgencyPayload.companyName} » a été enregistrée uniquement dans la mémoire locale de ce navigateur car le serveur Supabase (/api/saas/tenants) n’est pas joignable sur cette adresse ou connexion. Pour qu’elle soit visible et approuvée par le Super Admin (assamoighislain@gmail.com) sur tous les appareils, ouvrez l’adresse officielle connectée à Supabase ou cliquez sur le bouton « Sync » dès le retour de la connexion.`
           : isSuperAdminEmail
           ? `Agence « ${newAgencyPayload.companyName} » créée et activée immédiatement par le Super Admin (WhatsApp : ${cleanWhatsapp}). Une notification sonore a été émise et le message WhatsApp est prêt ci-dessous.`
-          : `Agence « ${newAgencyPayload.companyName} » enregistrée dans Cloud SQL avec succès (Rôle par défaut : Directeur d’Agence · WhatsApp : ${cleanWhatsapp}). Elle est immédiatement visible en attente d’approbation dans la console du Super Admin (assamoighislain@gmail.com).`
+          : `Agence « ${newAgencyPayload.companyName} » enregistrée dans Supabase avec succès (Rôle par défaut : Directeur d’Agence · WhatsApp : ${cleanWhatsapp}). Elle est immédiatement visible en attente d’approbation dans la console du Super Admin (assamoighislain@gmail.com).`
       );
       bodyScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
       if (typeof window !== 'undefined') {
@@ -737,18 +757,33 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Mot de passe *
+                  Mot de passe
                 </label>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
-                    type="password"
-                    required
+                    type={showLoginPassword ? 'text' : 'password'}
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full pl-9 pr-3 py-2.5 text-sm bg-white border border-slate-300 rounded-md focus:outline-none focus:border-indigo-600 text-slate-900"
+                    className="w-full pl-9 pr-10 py-2.5 text-sm bg-white border border-slate-300 rounded-md focus:outline-none focus:border-indigo-600 text-slate-900"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowLoginPassword((prev) => !prev)}
+                    className="absolute right-2.5 top-2 p-1 text-slate-400 hover:text-slate-700"
+                    title={
+                      showLoginPassword
+                        ? 'Masquer le mot de passe'
+                        : 'Afficher le mot de passe'
+                    }
+                  >
+                    {showLoginPassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
                 </div>
               </div>
 
@@ -761,158 +796,6 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
                 {submitting ? 'Connexion en cours...' : 'Se connecter'}
               </button>
             </form>
-
-            {/* Séparateur */}
-            <div className="relative flex py-1 items-center">
-              <div className="flex-grow border-t border-slate-200" />
-              <span className="flex-shrink mx-3 text-xs font-semibold text-slate-400 uppercase">
-                ou
-              </span>
-              <div className="flex-grow border-t border-slate-200" />
-            </div>
-
-            {/* Connexion Google Auth */}
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={async () => {
-                setErrorMsg(null);
-                setApprovalPendingNotice(null);
-                setSubmitting(true);
-                try {
-                  const latestCheck = await checkCurrentDomainAuthorized();
-                  setDomainCheck(latestCheck);
-                  if (!latestCheck.authorized) {
-                    setErrorMsg(
-                      `Le domaine actuel « ${latestCheck.currentDomain} » doit être ajouté dans les Domaines autorisés de Firebase Authentication avant d’utiliser le bouton Google (ou connectez-vous directement ci-dessus par Email et Mot de passe).`
-                    );
-                    return;
-                  }
-                  await onGoogleLogin(defaultTenantId);
-                  onClose?.();
-                } catch (err: any) {
-                  if (isFirebaseUnauthorizedDomainError(err)) {
-                    const host =
-                      typeof window !== 'undefined'
-                        ? window.location.hostname
-                        : '';
-                    setDomainCheck((prev) => ({
-                      authorized: false,
-                      currentDomain: host,
-                      authorizedDomains: prev?.authorizedDomains || [],
-                      projectId: firebaseConfig.projectId || '',
-                      firebaseSettingsUrl: `https://console.firebase.google.com/project/${encodeURIComponent(firebaseConfig.projectId || '')}/authentication/settings`,
-                    }));
-                    setErrorMsg(formatFirebaseAuthErrorFr(err));
-                  } else if (err?.message) {
-                    setErrorMsg(err.message);
-                  }
-                } finally {
-                  setSubmitting(false);
-                }
-              }}
-              className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 text-indigo-950 border border-slate-300 rounded-md text-xs font-bold shadow-2xs flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
-            >
-              <ShieldCheck className="w-4 h-4 text-indigo-700" />
-              Continuer avec Google
-            </button>
-
-            {domainCheck && !domainCheck.authorized && (
-              <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-lg space-y-2.5 text-xs text-amber-950">
-                <div className="font-extrabold flex items-center gap-1.5 text-amber-900">
-                  <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
-                  <span>
-                    Domaine à autoriser dans Firebase pour « Continuer avec Google »
-                  </span>
-                </div>
-                <p className="text-[11px] text-amber-900 leading-relaxed">
-                  Vous accédez à l’application depuis le domaine{' '}
-                  <strong className="font-mono bg-white px-1.5 py-0.5 rounded-sm border border-amber-300">
-                    {domainCheck.currentDomain}
-                  </strong>
-                  , qui n’est pas encore inscrit dans les{' '}
-                  <strong>Domaines autorisés</strong> du projet Firebase{' '}
-                  <strong className="font-mono">{domainCheck.projectId}</strong>.
-                </p>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleCopyCurrentDomain(domainCheck.currentDomain)
-                    }
-                    className="px-2.5 py-1.5 bg-white hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-md text-[11px] font-bold inline-flex items-center gap-1.5 transition-colors"
-                  >
-                    {copiedDomain ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Domaine copié !</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Copier « {domainCheck.currentDomain} »</span>
-                      </>
-                    )}
-                  </button>
-
-                  <a
-                    href={domainCheck.firebaseSettingsUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-2.5 py-1.5 bg-indigo-950 hover:bg-indigo-900 text-white rounded-md text-[11px] font-bold inline-flex items-center gap-1.5 transition-colors"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5 text-amber-300" />
-                    <span>1. Ouvrir Firebase (Domaines autorisés)</span>
-                  </a>
-
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={async () => {
-                      setSubmitting(true);
-                      setErrorMsg(null);
-                      try {
-                        const refreshed = await checkCurrentDomainAuthorized();
-                        setDomainCheck(refreshed);
-                        if (refreshed.authorized) {
-                          await onGoogleLogin(defaultTenantId);
-                          onClose?.();
-                        } else {
-                          setErrorMsg(
-                            `Le domaine « ${refreshed.currentDomain} » n’apparaît pas encore dans Firebase. Cliquez sur « Ajouter un domaine » dans Authentication > Settings > Domaines autorisés puis réessayez.`
-                          );
-                        }
-                      } catch (err: any) {
-                        if (err?.message) setErrorMsg(err.message);
-                      } finally {
-                        setSubmitting(false);
-                      }
-                    }}
-                    className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-md text-[11px] font-bold inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>2. J’ai ajouté le domaine, réessayer</span>
-                  </button>
-                </div>
-
-                <div className="pt-1.5 border-t border-amber-200/80 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                  <span className="text-amber-900">
-                    La connexion <strong>Email & Mot de passe</strong> ci-dessus fonctionne immédiatement sur ce domaine sans configuration Firebase :
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setErrorMsg(null);
-                      emailInputRef.current?.focus();
-                    }}
-                    className="font-extrabold text-indigo-900 underline hover:text-indigo-700"
-                  >
-                    Utiliser Email & Mot de passe
-                  </button>
-                </div>
-              </div>
-            )}
 
             <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-md text-[11px] text-slate-600 leading-relaxed">
               <strong className="text-slate-800">Accès collaborateurs :</strong>{' '}
@@ -1104,14 +987,32 @@ export const AuthAccountModal: React.FC<AuthAccountModalProps> = ({
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   Mot de passe *
                 </label>
-                <input
-                  type="password"
-                  required
-                  value={regPassword}
-                  onChange={(e) => setRegPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-md focus:outline-none focus:border-indigo-600 text-slate-900"
-                />
+                <div className="relative">
+                  <input
+                    type={showRegPassword ? 'text' : 'password'}
+                    required
+                    value={regPassword}
+                    onChange={(e) => setRegPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full px-3 pr-9 py-2 text-xs border border-slate-300 rounded-md focus:outline-none focus:border-indigo-600 text-slate-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowRegPassword((prev) => !prev)}
+                    className="absolute right-2 top-1.5 p-1 text-slate-400 hover:text-slate-700"
+                    title={
+                      showRegPassword
+                        ? 'Masquer le mot de passe'
+                        : 'Afficher le mot de passe'
+                    }
+                  >
+                    {showRegPassword ? (
+                      <EyeOff className="w-3.5 h-3.5" />
+                    ) : (
+                      <Eye className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
 

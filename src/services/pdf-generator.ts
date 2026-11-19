@@ -33,6 +33,7 @@ import {
   loadAppSettingsFromSupabase,
   saveAppSettingsToSupabase,
 } from '../db/supabase.ts';
+import { getAllUsers, upsertUserRecord } from '../db/users.ts';
 
 const SAAS_SETTINGS_ROW_ID = 'gimmo_saas_store';
 const TEMPLATES_FILE_PATH = path.resolve(
@@ -472,7 +473,7 @@ export async function upsertSaaSUserEntry(
   const existingIdx = existingList.findIndex(
     (u) =>
       (targetId && u.id === targetId) ||
-      (!targetId && u.email.trim().toLowerCase() === normalizedTargetEmail)
+      u.email.trim().toLowerCase() === normalizedTargetEmail
   );
   const existingUser = existingIdx >= 0 ? existingList[existingIdx] : null;
 
@@ -628,7 +629,267 @@ export async function upsertSaaSUserEntry(
     updatedAt: nowIso,
   };
 
-  return await persistTemplatesStore(next);
+  const savedStore = await persistTemplatesStore(next);
+
+  // Synchronisation best-effort vers la table public.users de Supabase
+  const mappedDbRole: 'administrateur' | 'gerant' | 'commercial' =
+    resolvedRole === 'super_admin' || resolvedRole === 'agency_admin'
+      ? 'administrateur'
+      : resolvedRole === 'manager'
+        ? 'gerant'
+        : 'commercial';
+  upsertUserRecord({
+    email: payload.email.trim().toLowerCase(),
+    name: payload.fullName.trim(),
+    role: mappedDbRole,
+  }).catch((err) => {
+    console.warn('Best-effort sync to public.users failed:', err?.message || err);
+  });
+
+  return savedStore;
+}
+
+export interface SaaSLoginResult {
+  ok: boolean;
+  status: number;
+  code?:
+    | 'INVALID_INPUT'
+    | 'USER_NOT_FOUND'
+    | 'USER_SUSPENDED'
+    | 'PASSWORD_REQUIRED'
+    | 'INVALID_PASSWORD'
+    | 'PENDING_APPROVAL'
+    | 'AGENCY_SUSPENDED';
+  error?: string;
+  user?: SaaSUserAccount;
+  agency?: SaaSTenantAgency;
+  templates?: DocumentTemplatesStore;
+}
+
+export async function authenticateSaaSUserEntry(
+  email: string,
+  password: string
+): Promise<SaaSLoginResult> {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const typedPassword = String(password || '').trim();
+
+  if (!normalizedEmail) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_INPUT',
+      error: 'Veuillez saisir votre adresse email professionnelle.',
+    };
+  }
+
+  const current = await initTemplatesStoreFromDb();
+  const tenants = resolveSaaSTenants(current);
+  const users = resolveSaaSUsers(current);
+  const nowIso = new Date().toISOString();
+
+  const isMainSuperAdmin = normalizedEmail === 'assamoighislain@gmail.com';
+
+  let foundUser: SaaSUserAccount | undefined = isMainSuperAdmin
+    ? users.find(
+        (u) =>
+          u.email.trim().toLowerCase() === normalizedEmail &&
+          u.role === 'super_admin'
+      ) || users.find((u) => u.email.trim().toLowerCase() === normalizedEmail)
+    : [...users]
+        .reverse()
+        .find((u) => u.email.trim().toLowerCase() === normalizedEmail);
+
+  // Fallback : si l'utilisateur existe dans la table public.users de Supabase mais pas encore dans saasUsers
+  if (!foundUser && !isMainSuperAdmin) {
+    const dbUsers = await getAllUsers().catch(() => []);
+    const matchedDbUser = dbUsers.find(
+      (u) => u.email.trim().toLowerCase() === normalizedEmail
+    );
+    if (matchedDbUser) {
+      const defaultAgency =
+        tenants.find((t) => t.isCurrentTenant && t.status === 'active') ||
+        tenants.find((t) => t.status === 'active') ||
+        tenants[0];
+      const mappedRole: SaaSUserAccount['role'] =
+        matchedDbUser.role === 'administrateur'
+          ? 'agency_admin'
+          : matchedDbUser.role === 'gerant'
+            ? 'manager'
+            : 'agent';
+      foundUser = {
+        id: `user_db_${matchedDbUser.id}`,
+        fullName: matchedDbUser.name || normalizedEmail.split('@')[0],
+        email: normalizedEmail,
+        role: mappedRole,
+        tenantId: defaultAgency?.id || 'tenant_gimmo_prestige',
+        tenantName:
+          defaultAgency?.companyName || 'GIMMO PRESTIGE IMMOBILIER SARL',
+        status: 'active',
+        createdAt: matchedDbUser.createdAt || nowIso,
+      };
+    }
+  }
+
+  // Fallback Super Admin principal
+  if (!foundUser && isMainSuperAdmin) {
+    const chosenAgency =
+      tenants.find((t) => t.isCurrentTenant) || tenants[0];
+    foundUser = {
+      id: 'user_super_admin_main',
+      fullName: 'Ghislain Assamoi',
+      email: normalizedEmail,
+      role: 'super_admin',
+      tenantId: chosenAgency?.id || 'tenant_gimmo_prestige',
+      tenantName:
+        chosenAgency?.companyName || 'GIMMO PRESTIGE IMMOBILIER SARL',
+      status: 'active',
+      createdAt: nowIso.split('T')[0],
+    };
+  }
+
+  if (!foundUser) {
+    return {
+      ok: false,
+      status: 404,
+      code: 'USER_NOT_FOUND',
+      error:
+        'Aucun compte trouvé pour cette adresse email. Seul l’Administrateur ou le Directeur de l’Agence peut créer les comptes des autres utilisateurs et leur affecter un rôle. Pour enregistrer une nouvelle agence immobilière, utilisez l’onglet « Créer une agence ».',
+    };
+  }
+
+  const isSuperAdmin =
+    isMainSuperAdmin || foundUser.role === 'super_admin';
+
+  if (!isSuperAdmin && foundUser.status === 'suspended') {
+    return {
+      ok: false,
+      status: 403,
+      code: 'USER_SUSPENDED',
+      error:
+        'Ce compte utilisateur est suspendu par l’Administrateur ou le Directeur d’Agence.',
+    };
+  }
+
+  const storedPassword = (foundUser.password || '').trim();
+  if (storedPassword) {
+    if (!typedPassword) {
+      return {
+        ok: false,
+        status: 401,
+        code: 'PASSWORD_REQUIRED',
+        error: 'Veuillez saisir votre mot de passe.',
+      };
+    }
+    const isPasswordMatch =
+      typedPassword === storedPassword ||
+      (storedPassword.toUpperCase().startsWith('GIM-') &&
+        typedPassword.toUpperCase() === storedPassword.toUpperCase());
+    if (!isPasswordMatch) {
+      return {
+        ok: false,
+        status: 401,
+        code: 'INVALID_PASSWORD',
+        error: 'Mot de passe incorrect pour ce compte utilisateur.',
+      };
+    }
+  }
+
+  const linkedAgency =
+    tenants.find((t) => t.id === foundUser!.tenantId) ||
+    tenants.find(
+      (t) =>
+        t.companyName.trim().toLowerCase() ===
+        foundUser!.tenantName.trim().toLowerCase()
+    ) ||
+    tenants.find((t) => t.isCurrentTenant) ||
+    tenants[0];
+
+  if (!isSuperAdmin && linkedAgency?.status === 'pending_approval') {
+    return {
+      ok: false,
+      status: 403,
+      code: 'PENDING_APPROVAL',
+      error: `L’agence immobilière « ${linkedAgency.companyName} » est actuellement en attente d’approbation. Seul le Super Admin (assamoighislain@gmail.com) a le droit d’approuver une agence immobilière.`,
+    };
+  }
+
+  if (!isSuperAdmin && linkedAgency?.status === 'suspended') {
+    return {
+      ok: false,
+      status: 403,
+      code: 'AGENCY_SUSPENDED',
+      error: `L’agence immobilière « ${linkedAgency.companyName} » est suspendue par le Super Admin.`,
+    };
+  }
+
+  const authenticatedUser: SaaSUserAccount = {
+    ...foundUser,
+    role: isMainSuperAdmin ? 'super_admin' : foundUser.role,
+    tenantId: linkedAgency?.id || foundUser.tenantId,
+    tenantName: linkedAgency?.companyName || foundUser.tenantName,
+    lastLoginAt: nowIso,
+  };
+
+  const existingUserIdx = users.findIndex(
+    (u) =>
+      u.id === authenticatedUser.id ||
+      u.email.trim().toLowerCase() === normalizedEmail
+  );
+
+  const updatedUsers =
+    existingUserIdx >= 0
+      ? users.map((u, idx) =>
+          idx === existingUserIdx ? { ...u, ...authenticatedUser } : u
+        )
+      : [...users, authenticatedUser];
+
+  const updatedTenants = linkedAgency
+    ? tenants.map((t) => ({
+        ...t,
+        isCurrentTenant: t.id === linkedAgency.id,
+      }))
+    : tenants;
+
+  let nextManagementCompany = resolveManagementCompany(current);
+  const activeTenant = updatedTenants.find((t) => t.isCurrentTenant);
+  if (activeTenant) {
+    nextManagementCompany = {
+      ...nextManagementCompany,
+      companyName: activeTenant.companyName,
+      tradeName: activeTenant.tradeName,
+      legalForm: activeTenant.legalForm,
+      rccm: activeTenant.rccm,
+      taxId: activeTenant.taxId,
+      licenseNumber: activeTenant.licenseNumber,
+      managerName: activeTenant.managerName,
+      address: activeTenant.address,
+      city: activeTenant.city,
+      phone: activeTenant.phone,
+      email: activeTenant.ownerEmail,
+      updatedAt: nowIso,
+    };
+  }
+
+  const nextStore: DocumentTemplatesStore = {
+    leases: { ...current.leases },
+    receipts: { ...current.receipts },
+    accountingMonths: resolveAccountingMonths(current),
+    propertyTypes: resolvePropertyTypes(current),
+    managementCompany: nextManagementCompany,
+    saasTenants: updatedTenants,
+    saasUsers: updatedUsers,
+    updatedAt: nowIso,
+  };
+
+  const persisted = await persistTemplatesStore(nextStore);
+
+  return {
+    ok: true,
+    status: 200,
+    user: authenticatedUser,
+    agency: activeTenant || linkedAgency,
+    templates: persisted,
+  };
 }
 
 export async function deleteSaaSUserEntry(

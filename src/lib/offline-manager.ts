@@ -650,14 +650,22 @@ export function applyOptimisticMutationToSnapshot(
     const makeCurrent = Boolean(body.isCurrentTenant);
     const existingIdx = currentList.findIndex((t) => targetId && t.id === targetId);
 
-    if (existingIdx >= 0) {
+    if (body.activateOnly) {
+      if (existingIdx >= 0) {
+        store.saasTenants = currentList.map((item, idx) => ({
+          ...item,
+          isCurrentTenant: idx === existingIdx,
+        }));
+      }
+    } else if (existingIdx >= 0) {
+      const { activateOnly: _ignored, ...cleanBody } = body;
       store.saasTenants = currentList.map((item, idx) => {
         if (idx !== existingIdx) {
           return makeCurrent ? { ...item, isCurrentTenant: false } : item;
         }
         return {
           ...item,
-          ...body,
+          ...cleanBody,
           isCurrentTenant: makeCurrent ? true : item.isCurrentTenant,
         };
       });
@@ -729,10 +737,11 @@ export function applyOptimisticMutationToSnapshot(
     const currentList = store.saasUsers || [];
     const tenants = store.saasTenants || [];
     const targetId = body.id || '';
+    const normalizedEmail = String(body.email || '').trim().toLowerCase();
     const existingIdx = currentList.findIndex(
       (u) =>
         (targetId && u.id === targetId) ||
-        (!targetId && u.email.toLowerCase() === String(body.email || '').trim().toLowerCase())
+        (normalizedEmail && u.email.trim().toLowerCase() === normalizedEmail)
     );
     const matchedTenant =
       tenants.find((t) => t.id === body.tenantId) ||

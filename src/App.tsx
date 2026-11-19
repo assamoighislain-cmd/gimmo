@@ -497,7 +497,22 @@ export default function App() {
   }, []);
 
   const handleAccountLoginSuccess = useCallback(
-    async (account: SaaSUserAccount, _agency: SaaSTenantAgency) => {
+    async (
+      account: SaaSUserAccount,
+      _agency: SaaSTenantAgency,
+      freshTemplates?: DocumentTemplatesStore
+    ) => {
+      if (freshTemplates) {
+        setTemplatesStore(freshTemplates);
+        saveOfflineSnapshot({
+          landlords,
+          properties,
+          tenants,
+          leases,
+          payments,
+          templates: freshTemplates,
+        });
+      }
       setActiveAccount(account);
       try {
         localStorage.setItem('gimmo_active_account_v1', JSON.stringify(account));
@@ -506,7 +521,7 @@ export default function App() {
       }
       await fetchOverviewData();
     },
-    [fetchOverviewData]
+    [fetchOverviewData, landlords, properties, tenants, leases, payments]
   );
 
   const handleAgencyRegistered = useCallback(
@@ -902,7 +917,6 @@ export default function App() {
         onLoginSuccess={handleAccountLoginSuccess}
         onLandlordPortalLoginSuccess={handleLandlordPortalLoginSuccess}
         onLogout={handleLogout}
-        onGoogleLogin={handleGoogleLoginWithAgency}
         onAgencyRegistered={handleAgencyRegistered}
       />
     );
@@ -1872,8 +1886,7 @@ export default function App() {
           onLoginSuccess={handleAccountLoginSuccess}
           onLandlordPortalLoginSuccess={handleLandlordPortalLoginSuccess}
           onLogout={handleLogout}
-          onGoogleLogin={handleGoogleLoginWithAgency}
-          onAgencyRegistered={fetchOverviewData}
+          onAgencyRegistered={handleAgencyRegistered}
           onClose={() => setIsAuthModalOpen(false)}
         />
       )}
