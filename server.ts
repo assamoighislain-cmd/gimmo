@@ -33,6 +33,10 @@ import {
 import { resolveManagementCompany } from './src/lib/document-templates.ts';
 import { buildLandlordPortalWhatsAppDetails } from './src/lib/landlord-portal.ts';
 import { getOrCreateUser } from './src/db/users.ts';
+import {
+  checkSupabaseTablesStatus,
+  syncFullDatasetToSupabase,
+} from './src/db/supabase.ts';
 import { requireAuth, type AuthRequest } from './src/middleware/auth.ts';
 import {
   streamReceiptPdf,
@@ -114,6 +118,16 @@ async function startServer() {
       sseClients.forEach((res) => {
         res.write(`data: ${payload}\n\n`);
       });
+
+      // Réplication asynchrone vers Supabase si configuré et tables créées
+      void syncFullDatasetToSupabase({
+        landlords: data.landlords as any,
+        properties: data.properties as any,
+        tenants: data.tenants as any,
+        leases: data.leases as any,
+        payments: data.payments as any,
+        storeJson: JSON.stringify(data.templates, null, 2),
+      });
     } catch (err) {
       console.error('Error broadcasting real-time state:', err);
     }
@@ -176,6 +190,39 @@ async function startServer() {
     req.on('close', () => {
       sseClients.delete(res);
     });
+  });
+
+  // Vérification sécurisée et synchronisation Supabase côté serveur (aucune clé secrète exposée)
+  app.get('/api/supabase/health', async (_req, res) => {
+    try {
+      const status = await checkSupabaseTablesStatus();
+      return res.json(status);
+    } catch (error: any) {
+      return res.status(500).json({
+        configured: false,
+        error: error?.message || 'Erreur lors de la vérification Supabase',
+      });
+    }
+  });
+
+  app.post('/api/supabase/sync', async (_req, res) => {
+    try {
+      const data = await getDashboardDataWithTemplates();
+      const result = await syncFullDatasetToSupabase({
+        landlords: data.landlords as any,
+        properties: data.properties as any,
+        tenants: data.tenants as any,
+        leases: data.leases as any,
+        payments: data.payments as any,
+        storeJson: JSON.stringify(data.templates, null, 2),
+      });
+      return res.status(result.synced ? 200 : 400).json(result);
+    } catch (error: any) {
+      return res.status(500).json({
+        synced: false,
+        reason: error?.message || 'Erreur synchronisation Supabase',
+      });
+    }
   });
 
   /**

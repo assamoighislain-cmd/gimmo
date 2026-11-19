@@ -32,6 +32,10 @@ import { validateWhatsAppPhone } from '../lib/agency-notifications.ts';
 import { db } from '../db/index.ts';
 import { appSettings } from '../db/schema.ts';
 import { eq } from 'drizzle-orm';
+import {
+  loadAppSettingsFromSupabase,
+  syncAppSettingsToSupabase,
+} from '../db/supabase.ts';
 
 const SAAS_SETTINGS_ROW_ID = 'gimmo_saas_store';
 const TEMPLATES_FILE_PATH = path.resolve(
@@ -76,6 +80,21 @@ export async function initTemplatesStoreFromDb(): Promise<DocumentTemplatesStore
   } catch (err) {
     console.warn('Could not load SaaS store from Cloud SQL app_settings:', err);
   }
+
+  // Repli optionnel sur Supabase si configuré et tables initialisées
+  try {
+    const supabaseJson = await loadAppSettingsFromSupabase(SAAS_SETTINGS_ROW_ID);
+    if (supabaseJson) {
+      const parsed = JSON.parse(supabaseJson) as DocumentTemplatesStore;
+      if (parsed && parsed.leases && parsed.receipts) {
+        memoryTemplatesStore = normalizeLoadedStore(parsed);
+        return memoryTemplatesStore;
+      }
+    }
+  } catch {
+    // Ignore si les tables Supabase ne sont pas encore créées
+  }
+
   return getDocumentTemplatesStore();
 }
 
@@ -108,6 +127,8 @@ async function persistTemplatesStore(
   } catch (err) {
     console.warn('Could not persist SaaS store to Cloud SQL app_settings:', err);
   }
+  // Réplication asynchrone vers Supabase si configuré et tables créées
+  void syncAppSettingsToSupabase(SAAS_SETTINGS_ROW_ID, serialized);
   return next;
 }
 
