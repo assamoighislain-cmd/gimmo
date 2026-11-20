@@ -18,7 +18,8 @@ export const requireAuth = async (
 
   const token = authHeader.split('Bearer ')[1];
   try {
-    const decodedToken = await getAdminAuth().verifyIdToken(token);
+    const adminAuth = await getAdminAuth();
+    const decodedToken = await adminAuth.verifyIdToken(token);
     req.user = decodedToken;
     next();
   } catch (error) {
