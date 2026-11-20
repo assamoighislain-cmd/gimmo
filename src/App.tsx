@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, startTransition } from 'react';
 import {
   signInWithPopup,
   signOut,
@@ -381,9 +381,11 @@ export default function App() {
     enabled: !isEffectiveOffline,
     onStateReceived: useCallback(
       (data, meta) => {
-        applySnapshotState({
-          ...data,
-          lastSyncedAt: meta.timestamp,
+        startTransition(() => {
+          applySnapshotState({
+            ...data,
+            lastSyncedAt: meta.timestamp,
+          });
         });
       },
       [applySnapshotState]

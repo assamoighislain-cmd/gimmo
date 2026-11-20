@@ -75,9 +75,20 @@ export function createGimmoApiApp(options: CreateGimmoApiOptions = {}): Express 
     }
   };
 
+  // Indique au frontend le mode de synchronisation temps réel optimal selon l'hébergement (Node WS/SSE vs Vercel Serverless)
+  app.get('/api/realtime/mode', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (options.serverlessMode) {
+      return res.json({ mode: 'polling', intervalMs: 10000 });
+    }
+    return res.json({ mode: 'ws', intervalMs: 0 });
+  });
+
   // En mode Serverless (ex: Vercel), éviter les connexions SSE infinies qui dépassent le timeout de fonction
   if (options.serverlessMode) {
     app.get('/api/realtime/events', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Gimmo-Realtime-Mode', 'polling');
       res.status(204).end();
     });
   }
