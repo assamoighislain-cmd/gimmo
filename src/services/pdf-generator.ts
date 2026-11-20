@@ -38,7 +38,7 @@ import { getAllUsers, upsertUserRecord } from '../db/users.ts';
 
 const SAAS_SETTINGS_ROW_ID = 'gimmo_saas_store';
 const TEMPLATES_FILE_PATH = path.resolve(
-  process.cwd(),
+  process.env.VERCEL ? '/tmp' : process.cwd(),
   '.gimmo-document-templates.json'
 );
 
