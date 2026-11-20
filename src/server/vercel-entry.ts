@@ -1,5 +1,5 @@
 import * as dotenv from 'dotenv';
-import { createGimmoApiApp } from '../src/server/create-app.ts';
+import { createGimmoApiApp } from './create-app.ts';
 
 dotenv.config();
 

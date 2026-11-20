@@ -24,9 +24,10 @@ function resolveFirebaseProjectId(): string | undefined {
   return undefined;
 }
 
-if (!getApps().length) {
-  const projectId = resolveFirebaseProjectId();
-  initializeApp(projectId ? { projectId } : undefined);
+export function getAdminAuth() {
+  if (!getApps().length) {
+    const projectId = resolveFirebaseProjectId();
+    initializeApp(projectId ? { projectId } : undefined);
+  }
+  return getAuth();
 }
-
-export const adminAuth = getAuth();
